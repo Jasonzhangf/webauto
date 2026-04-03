@@ -97,6 +97,8 @@ async function main(){
   writeFileSync(API_PID_FILE, String(child.pid));
   // wait for health
   for(let i=0;i<20;i++){ if (await health()) { console.log('API started. PID', child.pid); return; } await wait(500); }
+  // Health check failed — kill orphaned child to prevent leak
+  try { child.kill('SIGTERM'); } catch {}
   console.error('API did not become healthy in time'); process.exit(1);
 }
 

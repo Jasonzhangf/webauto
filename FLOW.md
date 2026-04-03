@@ -627,3 +627,81 @@ if (commandType.startsWith('weibo-')) {
 3. **images 字段** — 当前测试中所有帖子 `images: []`，需要验证带图帖子是否能正确提取图片 URL
 4. **daemon 模式验证** — 定时任务依赖 schedule daemon 运行，需确认 daemon 进程健康
 
+
+---
+
+## Part 3: 微博用户主页调研（Phase 1） ✅ (2026-04-01 23:41)
+
+### 测试环境
+- Profile: weibo (camo, dev mode, non-headless)
+- 测试用户: https://weibo.com/u/1402400261 (爱可可-爱生活)
+- camo version: 0.2.0
+
+### 页面基本信息
+- URL 格式: `https://weibo.com/u/{userId}`
+- 页面标题: `@{userName} 的个人主页`
+- 使用 `vue-recycle-scroller` 虚拟滚动（`page-mode direction-vertical`）
+- 初始加载 6 条帖子，滚动后加载到 13 条
+
+### DOM 结构（已验证）
+
+```css
+/* 页面滚动容器 */
+.vue-recycle-scroller.ready.page-mode.direction-vertical    /* 虚拟滚动容器 */
+  .vue-recycle-scroller__item-view                           /* 每条帖子的视口项 */
+
+/* 帖子条目 */
+.vue-recycle-scroller__item-view > .wbpro-scroller-item     /* 帖子主体 */
+  article.woo-panel-main                                     /* 帖子文章容器 */
+
+/* 帖子字段提取（精确选择器） */
+.wbpro-scroller-item [class*=_name_ygi5b]                   /* 作者昵称 → "爱可可-爱生活" */
+.wbpro-scroller-item [class*=_time_1tpft]                   /* 发布时间 → "2小时前" */
+.wbpro-scroller-item [class*=_source_1tpft]                 /* 来源 → "来自 Mac客户端" */
+.wbpro-feed-ogText                                           /* 正文内容 → "[人人能懂AI前沿] 从推理生成..." */
+.wbpro-feed-ogText ._wbtext_q1l14_14                        /* 纯文本子元素 */
+.woo-picture-main                                           /* 图片容器（存在=有图） */
+[class*=_retweetIcon_198pe]                                  /* 转发图标 */
+[class*=_commentIcon_198pe]                                  /* 评论图标 */
+.woo-like-main                                              /* 点赞按钮 */
+
+/* 帖子链接提取 */
+/* 帖子内 a[href] 中匹配 /weibo.com/{userId}/{postId} 格式 */
+/* postId 格式: 8+ 字母数字如 QySHk7Wb7 */
+/* 提取方式: 遍历 a[href]，正则匹配 /\/[A-Za-z0-9]{8,}$/ */
+
+/* 互动计数 */
+[class*=_retweetIcon_198pe] + [class*=_num_198pe]           /* 转发数 */
+[class*=_commentIcon_198pe] + [class*=_num_198pe]           /* 评论数 */
+.woo-like-main 内部文本                                      /* 点赞数（当前返回"赞"文本） */
+```
+
+### 滚动机制（已验证）
+
+| # | 操作 | 结果 |
+|---|------|------|
+| 1 | 初始加载 | 6 个 `.vue-recycle-scroller__item-view` |
+| 2 | `document.documentElement.scrollTop = scrollHeight` → 7959 | 3 秒后 items 增至 13 |
+| 3 | 再次 scrollTo(scrollHeight) | 7959 不变（bodyHeight=9865, scrollTop 已到底） |
+| 4 | "没有更多"/"到底了"/"已显示全部" | 均未找到（可能该用户帖子不够多触发到底提示） |
+
+### 关键发现
+
+1. **虚拟滚动**：使用 `vue-recycle-scroller`，`page-mode`（整页滚动，非容器内滚动）
+2. **滚动方式**：`document.documentElement.scrollTop = scrollHeight` 有效，触发新内容加载
+3. **帖子加载**：每次滚动约加载 7 条新帖子
+4. **到底判断**：未在 13 条时触发"没有更多"提示（需要更多帖子的用户测试）
+5. **链接格式**：`https://weibo.com/{userId}/{postId}` 其中 postId 为 8+ 位字母数字
+6. **作者名选择器**：`[class*=_name_ygi5b]` 是稳定的动态类名前缀
+7. **时间选择器**：`[class*=_time_1tpft]` 是稳定的动态类名前缀
+8. **正文选择器**：`.wbpro-feed-ogText` 是稳定的全局类名
+9. **图片检测**：`.woo-picture-main` 存在即有图
+
+### 复用评估
+
+| 已有模块 | 复用可能性 | 说明 |
+|----------|-----------|------|
+| timeline-ops.mjs EXTRACT_TIMELINE_JS | 部分复用 | 用户主页与 timeline 使用相同的 vue-recycle-scroller 架构，但选择器有差异 |
+| weibo-search-extract.mjs | 不复用 | 搜索页使用 `.card-wrap` 分页模式，完全不同 |
+| weibo-detail-runner.mjs | 完全复用 | 帖子详情采集可直接复用，输入帖子 URL 即可 |
+

@@ -1,4 +1,3 @@
-Clock-Stop-When: no-open-tasks
 
 ## 背景
 

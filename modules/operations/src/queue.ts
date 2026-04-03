@@ -109,14 +109,30 @@ export class ContainerOperationQueue extends EventEmitter {
     task.startedAt = Date.now();
     task.status = 'running';
     this.emit('task:started', { task });
+
+    const TASK_TIMEOUT_MS = 120_000; // 2 minutes per task
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      task.error = `Task timed out after ${TASK_TIMEOUT_MS}ms`;
+      task.status = 'failed';
+      task.finishedAt = Date.now();
+      this.emit('task:failed', { task, error: task.error });
+    }, TASK_TIMEOUT_MS);
+    timer.unref();
+
     try {
       const executor = this.options.executor ?? this.defaultExecutor;
       const result = await executor(task, context);
+      if (timedOut) return;
+      clearTimeout(timer);
       task.result = result;
       task.status = 'completed';
       task.finishedAt = Date.now();
       this.emit('task:completed', { task, result });
     } catch (err: any) {
+      if (timedOut) return;
+      clearTimeout(timer);
       task.status = 'failed';
       task.error = err?.message || String(err);
       task.finishedAt = Date.now();

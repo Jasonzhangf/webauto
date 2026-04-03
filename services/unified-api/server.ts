@@ -70,6 +70,9 @@ class UnifiedApiServer {
   private sessionManager: any;
   private stateRegistry: any;
   private taskRegistry = taskStateRegistry;
+  private httpServer?: import('http').Server;
+  private cleanupInterval?: NodeJS.Timeout;
+  private isShuttingDown = false;
 
   constructor() {
     this.controller = new UiController({
@@ -235,7 +238,7 @@ class UnifiedApiServer {
     // Start state registry periodic cleanup
     const registry = this.stateRegistry;
     if (registry) {
-      setInterval(() => {
+      this.cleanupInterval = setInterval(() => {
         try {
           registry.cleanupOldSessions();
         } catch (err) {
@@ -247,7 +250,7 @@ class UnifiedApiServer {
       }, 5 * 60 * 1000); // 5 minutes
     }
     const { createServer } = await import('node:http');
-    const server = createServer();
+    this.httpServer = createServer(); const server = this.httpServer;
     const wss = new WebSocketServer({ server });
 
     // Initialize builtin operations
@@ -1041,17 +1044,50 @@ function resetProfileSession(profileId: string) {
 }
 
 // 监听进程退出信号
-process.on('SIGTERM', () => {
-  console.log('[unified-api] Received SIGTERM, shutting down gracefully');
-  logEvent('process.SIGTERM', {});
-  setTimeout(() => process.exit(0), 1000);
-});
+async function gracefulShutdown(signal: string) {
+  console.log(`[unified-api] Received ${signal}, shutting down gracefully`);
+  logEvent(`process.${signal}`, {});
 
-process.on('SIGINT', () => {
-  console.log('[unified-api] Received SIGINT, shutting down gracefully');
-  logEvent('process.SIGINT', {});
-  setTimeout(() => process.exit(0), 1000);
-});
+  // Prevent double shutdown
+  if ((server as any)?.isShuttingDown) return;
+  (server as any).isShuttingDown = true;
+
+  const FORCE_EXIT_MS = 5000;
+  const timer = setTimeout(() => {
+    console.warn('[unified-api] Graceful shutdown timed out, forcing exit');
+    process.exit(1);
+  }, FORCE_EXIT_MS);
+  timer.unref();
+
+  try {
+    // 1. Stop accepting new connections
+    (server as any).httpServer?.close();
+
+    // 2. Stop periodic cleanup
+    if ((server as any).cleanupInterval) {
+      clearInterval((server as any).cleanupInterval);
+    }
+
+    // 3. Shutdown state registry
+    (server as any).stateRegistry?.shutdown?.();
+
+    // 4. Close remote sessions (best-effort)
+    try {
+      await (server as any).sessionManager?.shutdown?.();
+    } catch (err) {
+      console.warn('[unified-api] sessionManager shutdown error:', (err as Error)?.message);
+    }
+  } catch (err) {
+    console.error('[unified-api] Shutdown error:', err);
+  }
+
+  clearTimeout(timer);
+  console.log('[unified-api] Shutdown complete');
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => { void gracefulShutdown('SIGTERM'); });
+process.on('SIGINT', () => { void gracefulShutdown('SIGINT'); });
 
 // ============================================================================
 // Start Server

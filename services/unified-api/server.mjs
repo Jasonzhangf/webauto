@@ -30,3 +30,10 @@ child.on('error', (err) => {
   console.error('[unified-api] Server error:', err);
   process.exit(1);
 });
+
+// Forward signals to the tsx child process
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+  process.on(sig, () => {
+    child.kill(sig);
+  });
+}

@@ -158,6 +158,8 @@ async function main() {
     await wait(300);
   }
 
+  // Health check failed — kill orphaned child to prevent leak
+  try { child.kill('SIGTERM'); } catch {}
   throw new Error('search gate did not become healthy in time');
 }
 

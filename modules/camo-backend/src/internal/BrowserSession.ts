@@ -356,11 +356,26 @@ export class BrowserSession {
 
 
   async close(): Promise<void> {
+    const CLOSE_TIMEOUT_MS = 10_000;
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (!settled) {
+        console.warn('[BrowserSession] close() timed out after 10s, forcing cleanup');
+        settled = true;
+      }
+    }, CLOSE_TIMEOUT_MS);
+    timeout.unref();
+
     try {
-      await this.stopRecording({ reason: 'session_close' }).catch(() => {});
-      await this.context?.close();
+      try {
+        await this.stopRecording({ reason: 'session_close' }).catch(() => {});
+        await this.context?.close();
+      } finally {
+        await this.browser?.close();
+      }
     } finally {
-      await this.browser?.close();
+      clearTimeout(timeout);
+      settled = true;
       this.lock.release();
       this.runtimeEvents.clearObservers();
       this.notifyExit();

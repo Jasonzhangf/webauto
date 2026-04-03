@@ -164,6 +164,8 @@ async function main() {
     await wait(300);
   }
 
+  // Health check failed — kill orphaned child to prevent leak
+  try { child.kill('SIGTERM'); } catch {}
   throw new Error('browser service did not become healthy in time');
 }
 
