@@ -46,13 +46,40 @@ import { callAPI, sleep } from '../../shared/api-client.mjs';
 
 ### 1.6 编码规范
 
-- 文本输入用 `fillInputValue`（禁用 `keyboard.type` 防 IME ）
+- 文本输入用 `fillInputValue`（禁用 `keyboard.type` 防 IME）
 - 快捷键用 `keyboard:press`
 - **等待必须锚点驱动**：禁止无锚点 `sleep`/`wait`，必须 `waitForAnchor` + 轮询
 - 锚点出现立即返回，超时 = 最长等待时间
+- 单次 CDP 调用（click/scroll/evaluate/goto）用 `withTimeout` 防止基础设施卡死（默认 15s）
+- **禁止对自终止业务操作加 operation 级超时**（见 1.7）
 
-- **禁止对自终止业务操作加超时**：循环采集类操作（评论采集、点赞、feed 扫描等）有自己的退出条件（到底检测 / 停滞检测 / 预算耗尽），operation 级别禁止加固定超时。超时只会杀掉正在进行的合法工作。只在 `runtime.mjs:getDefaultTimeoutMs` 中对单次 CDP 调用类操作设置超时。
-- 调用必须加 `withTimeout` 防止卡死（默认 15s）
+### 1.7 超时规则（硬约束，审计红线）
+
+**原则：只有单次基础设施调用需要超时，自终止业务操作禁止加超时。**
+
+| 操作类型 | 示例 | 超时 | 原因 |
+|----------|------|------|------|
+| 单次 CDP 调用 | click/scroll/evaluate/goto/pressKey | ✅ 15s | 可能基础设施卡死，无业务退出机制 |
+| 自终止循环采集 | comments_harvest/detail_harvest/feed_like | ❌ 禁止 | 有自己的退出条件（到底/停滞/预算） |
+| 导航等待 | open_detail/wait_for_anchor | ✅ 有上限轮询 | 锚点驱动，轮询有 maxAttempts |
+
+**为什么自终止操作不需要超时**：
+1. 耗时由页面内容决定，不可预测（200 条评论需要 3-8 分钟）
+2. 固定超时只会杀掉正在进行的合法工作（实测 60s 超时导致 15 个帖子 coverage 12-83%）
+3. 操作内部已有：锚点等待 + 停滞检测（stallRounds）+ 预算上限（commentBudget）+ 到底检测（reachedBottom）
+4. CDP 级别的单次操作（scroll/evaluate）已有自己的 `withTimeout` 保护
+
+**在 `runtime.mjs:getDefaultTimeoutMs()` 中维护白名单**：
+```javascript
+const SELF_TERMINATING_ACTIONS = new Set([
+  'xhs_detail_harvest', 'xhs_comments_harvest', 'xhs_expand_replies',
+  'xhs_comment_match', 'xhs_comment_like', 'xhs_comment_reply',
+  'xhs_feed_like', 'xhs_feed_like_tab_switch',
+]);
+if (SELF_TERMINATING_ACTIONS.has(action)) return 0; // 无超时
+```
+
+**新增任何长运行操作时，必须同步更新此白名单。**
 
 ---
 
@@ -102,11 +129,13 @@ import { callAPI, sleep } from '../../shared/api-client.mjs';
 - [ ] 选择器匹配正确
 - [ ] 等待有锚点
 - [ ] 无无意义 sleep
+- [ ] 自终止操作无 operation 级超时
 
 ### Phase 3：自动 E2E
 - [ ] daemon 任务启动成功
-- [ ] 日志无报错
+- [ ] 日志无 operation_timeout 错误
 - [ ] 采集数量符合预期
+- [ ] 覆盖率 ≥ 90%（评论采集）
 - [ ] 输出文件正常
 
 ---
@@ -144,6 +173,11 @@ import { callAPI, sleep } from '../../shared/api-client.mjs';
    - ✅ 状态文件内容（如 `events.jsonl` 关键行）
    - ✅ 输出文件预览（如 `posts.jsonl` 前几行）
 
+6. **未验证不许声称完成**
+   - 在浏览器真实线上验证通过之前，只能说"代码已修改，待验证"
+   - 不能把"本地 import 通过"等同于"功能正常"
+   - 不能把"脚本跑完无报错"等同于"采集成功"
+
 ---
 
 ## V. 注意事项
@@ -157,3 +191,16 @@ import { callAPI, sleep } from '../../shared/api-client.mjs';
 7. **编排逻辑只在 L2**：action provider 不包含多步流程控制
 8. **交付必须有截图证据**：不可仅凭"没有报错"宣称成功
 9. **时间戳对齐**：所有截图和日志必须是本次任务产生的，不可复用旧数据
+10. **新增长运行操作时同步更新超时白名单**（见 1.7）
+
+---
+
+## VI. 待验证修改记录
+
+> 本节记录所有已修改但**尚未通过浏览器真实线上验证**的改动。
+> 每条记录在 E2E 验证通过后标记为 ✅ 并移入 MEMORY.md。
+
+| 日期 | 修改内容 | 文件 | 状态 |
+|------|----------|------|------|
+| 2026-04-04 | 移除自终止业务操作超时（comments_harvest 等 8 个 action 返回 0） | `runtime.mjs` | ⏳ 待 E2E 验证 |
+| 2026-04-04 | weibo 切换 shared 导入（common.mjs 重写、删除 trace/diagnostic-utils） | `weibo/common.mjs`, `harvest-ops.mjs` | ⏳ 待 E2E 验证 |
