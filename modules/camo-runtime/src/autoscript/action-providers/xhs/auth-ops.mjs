@@ -1,6 +1,6 @@
 import { callAPI } from '../../../utils/browser-service.mjs';
 import { asErrorPayload, isCheckpointRiskUrl } from '../../../container/runtime-core/utils.mjs';
-import { runEvaluateScript, extractEvaluateResultData } from './common.mjs';
+import { runEvaluateScript, extractEvaluateResultData } from '../../shared/eval-ops.mjs';
 import { normalizeXhsLoginSignal } from '../../../utils/xhs-login-signal.mjs';
 import { clearXhsPendingQueues } from './state.mjs';
 

@@ -1,5 +1,5 @@
 import { pressKey, sleepRandom } from './dom-ops.mjs';
-import { emitOperationProgress } from './trace.mjs';
+import { emitOperationProgress } from '../../shared/trace.mjs';
 import { readFeedWindowSignature, waitForFeedWindowChange } from './feed-like-shared.mjs';
 
 export async function handleNoFeedTargetsLike({

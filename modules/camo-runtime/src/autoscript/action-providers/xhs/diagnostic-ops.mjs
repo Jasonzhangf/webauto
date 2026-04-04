@@ -1,8 +1,8 @@
 import path from 'node:path';
 import { getProfileState } from './state.mjs';
-import { emitOperationProgress } from './trace.mjs';
+import { emitOperationProgress } from '../../shared/trace.mjs';
 import { ensureDir, writeJsonFile, savePngBase64, resolveXhsOutputContext } from './persistence.mjs';
-import { sanitizeFileComponent, captureScreenshotToFile } from './diagnostic-utils.mjs';
+import { sanitizeFileComponent, captureScreenshotToFile } from '../../shared/diagnostic-utils.mjs';
 import { evaluateReadonly } from './dom-ops.mjs';
 
 export function buildTimeoutDomSnapshotScript() {

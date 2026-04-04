@@ -1,5 +1,5 @@
 import { getProfileState } from './state.mjs';
-import { emitActionTrace, buildTraceRecorder, emitOperationProgress } from './trace.mjs';
+import { emitActionTrace, buildTraceRecorder, emitOperationProgress } from '../../shared/trace.mjs';
 import { buildElementCollectability, normalizeInlineText } from './utils.mjs';
 import { readDetailSnapshot, readDetailState } from './detail-ops.mjs';
 import { readCommentsSnapshot, readCommentEntryPoint, readCommentTotalTarget, readCommentScrollContainerTarget, readVisibleCommentTarget, readVisibleCommentTargets, readResumeAnchorPairTarget, readLikeTargetByIndex, readLikeTargetByCommentId, readReplyTargetByIndex, readReplyInputTarget, readReplySendButtonTarget, readExpandReplyTargets } from './comments-ops.mjs';
@@ -8,7 +8,7 @@ import { markDetailSlotProgress, readDetailSlotState, writeDetailSlotState } fro
 import { resolveXhsOutputContext, readJsonlRows, mergeCommentsJsonl, writeCommentsMd, writeContentMarkdown, appendLikeStateRows, writeLikeSummary } from './persistence.mjs';
 import { clickPoint, sleep, clearAndType, pressKey, scrollBySelector, highlightVisualTarget, clearVisualHighlight, readLocation, waitForAnchor } from './dom-ops.mjs';
 import path from 'node:path';
-import { captureScreenshotToFile } from './diagnostic-utils.mjs';
+import { captureScreenshotToFile } from '../../shared/diagnostic-utils.mjs';
 
 const ALLOWED_COMMENT_SCROLL_SELECTORS = new Set(['.comments-container', '.comment-list', '.comments-el', '.note-scroller']);
 

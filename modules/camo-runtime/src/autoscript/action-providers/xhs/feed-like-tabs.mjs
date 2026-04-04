@@ -1,6 +1,6 @@
 ﻿import { waitForAnchor } from './dom-ops.mjs';
 import { getProfileState } from './state.mjs';
-import { emitOperationProgress } from './trace.mjs';
+import { emitOperationProgress } from '../../shared/trace.mjs';
 import {
   MAX_FEED_TABS,
   mapFeedLikeKind,

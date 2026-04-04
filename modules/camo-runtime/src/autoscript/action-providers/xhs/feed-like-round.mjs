@@ -2,7 +2,7 @@
 import { readSearchButton } from './search-ops.mjs';
 import { resolveSearchSubmitMethod } from './utils.mjs';
 import { getProfileState } from './state.mjs';
-import { buildTraceRecorder, emitOperationProgress } from './trace.mjs';
+import { buildTraceRecorder, emitOperationProgress } from '../../shared/trace.mjs';
 import { readFeedLikeCandidates } from './feed-like-candidates.mjs';
 import { executeFeedLikeClick, executeFeedUnlikeClick } from './feed-like-click.mjs';
 import { executeFeedLikeTabSwitch } from './feed-like-tabs.mjs';

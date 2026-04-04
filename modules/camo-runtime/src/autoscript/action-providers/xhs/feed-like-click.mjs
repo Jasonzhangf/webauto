@@ -1,6 +1,6 @@
 ﻿import path from 'node:path';
 import { clickPoint, waitForAnchor } from './dom-ops.mjs';
-import { captureScreenshotToFile } from './diagnostic-utils.mjs';
+import { captureScreenshotToFile } from '../../shared/diagnostic-utils.mjs';
 import { readNoteLikeStatus } from './feed-like-candidates.mjs';
 
 export async function executeFeedLikeClick({ profileId, candidate, pushTrace }) {

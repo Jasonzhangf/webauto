@@ -2,7 +2,7 @@ import { normalizeBaseNoteId } from "./utils.mjs";
 import { callAPI } from '../../../utils/browser-service.mjs';
 import { isCheckpointRiskUrl } from '../../../container/runtime-core/utils.mjs';
 import { getProfileState } from './state.mjs';
-import { buildTraceRecorder, emitActionTrace } from './trace.mjs';
+import { buildTraceRecorder, emitActionTrace } from '../../shared/trace.mjs';
 import { sleep, readLocation, clickPoint } from './dom-ops.mjs';
 import { readSearchCandidateByNoteId, readSearchCandidates, ensureSearchCandidateFullyVisible } from './search-ops.mjs';
 import { getCurrentTabIndex, loadCollectedLinks, readCollectedLinksCache, readActiveLinkForTab, writeTabSlotState } from './tab-state.mjs';

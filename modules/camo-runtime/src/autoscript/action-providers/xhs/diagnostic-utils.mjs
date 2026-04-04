@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { callAPI } from '../../../utils/browser-service.mjs';
-import { extractScreenshotBase64 } from './common.mjs';
+import { extractScreenshotBase64 } from '../../shared/eval-ops.mjs';
 import { ensureDir, savePngBase64 } from './persistence.mjs';
 
 export function sanitizeFileComponent(value, fallback = 'unknown') {

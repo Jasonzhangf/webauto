@@ -1,4 +1,4 @@
-import { buildTraceRecorder, emitActionTrace } from './trace.mjs';
+import { buildTraceRecorder, emitActionTrace } from '../../shared/trace.mjs';
 import { getProfileState } from './state.mjs';
 import {
   createSearchGateState,

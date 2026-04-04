@@ -1,32 +1,11 @@
 import { callAPI } from '../../../utils/browser-service.mjs';
 import { clamp } from './utils.mjs';
 import { normalizeArray } from '../../../container/runtime-core/utils.mjs';
-import { extractEvaluateResultData, runEvaluateScript } from './common.mjs';
+import { extractEvaluateResultData, runEvaluateScript } from '../../shared/eval-ops.mjs';
 import { withSerializedLock, getProfileState } from './state.mjs';
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
-
-export async function sleepRandom(minMs, maxMs, pushTrace, stage = 'sleep_random') {
-  const min = Math.max(0, Number(minMs) || 0);
-  const max = Math.max(min, Number(maxMs) || min);
-  const waitMs = Math.floor(min + Math.random() * (max - min + 1));
-  if (typeof pushTrace === 'function') {
-    pushTrace({ kind: 'wait', stage, waitMs, minMs: min, maxMs: max });
-  }
-  await sleep(waitMs);
-  return waitMs;
-}
-
-function withTimeout(promise, timeoutMs, code = 'OP_TIMEOUT') {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      const error = new Error(code);
-      (error).code = code;
-      reject(error);
-    }, Math.max(0, timeoutMs));
-    promise.then((result) => { clearTimeout(timer); resolve(result); }, (error) => { clearTimeout(timer); reject(error); });
-  });
-}
+import { sleep, withTimeout } from '../../shared/dom-ops.mjs';
+export { sleepRandom } from '../../shared/dom-ops.mjs';
+export { sleep, withTimeout } from '../../shared/dom-ops.mjs';
 
 export async function evaluateReadonly(profileId, script, options = {}) {
   const timeoutMs = Math.max(2000, Number(options?.timeoutMs) || 12000);
@@ -500,7 +479,6 @@ export async function clearAndType(profileId, text, keyDelayMs = 60, options = {
   );
 }
 
-export { sleep, withTimeout };
 
 export async function resolveSelectorTarget(profileId, selectors, options = {}) {
   const normalizedSelectors = normalizeArray(selectors)

@@ -1,5 +1,5 @@
 import { getProfileState, withSerializedLock } from './state.mjs';
-import { buildTraceRecorder, emitActionTrace, emitOperationProgress } from './trace.mjs';
+import { buildTraceRecorder, emitActionTrace, emitOperationProgress } from '../../shared/trace.mjs';
 import { resolveSearchLockKey, randomBetween, resolveSearchResultTokenLink, normalizeBaseNoteId, resolveSearchSubmitMethod } from './utils.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
