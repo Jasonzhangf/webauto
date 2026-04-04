@@ -50,6 +50,8 @@ import { callAPI, sleep } from '../../shared/api-client.mjs';
 - 快捷键用 `keyboard:press`
 - **等待必须锚点驱动**：禁止无锚点 `sleep`/`wait`，必须 `waitForAnchor` + 轮询
 - 锚点出现立即返回，超时 = 最长等待时间
+
+- **禁止对自终止业务操作加超时**：循环采集类操作（评论采集、点赞、feed 扫描等）有自己的退出条件（到底检测 / 停滞检测 / 预算耗尽），operation 级别禁止加固定超时。超时只会杀掉正在进行的合法工作。只在 `runtime.mjs:getDefaultTimeoutMs` 中对单次 CDP 调用类操作设置超时。
 - 调用必须加 `withTimeout` 防止卡死（默认 15s）
 
 ---

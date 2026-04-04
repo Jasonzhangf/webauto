@@ -381,6 +381,24 @@ export class AutoscriptRunner {
   }
 
   getDefaultTimeoutMs(operation) {
+
+    // Long-running business operations have their own exit conditions
+    // (bottom detection, stagnation, budget exhaustion).
+    // Adding a timeout to these is meaningless and harmful — it kills
+    // legitimate work. Only single-shot operations (CDP calls, clicks,
+    // navigation) need timeouts to detect infrastructure hangs.
+    const SELF_TERMINATING_ACTIONS = new Set([
+      'xhs_detail_harvest',
+      'xhs_comments_harvest',
+      'xhs_expand_replies',
+      'xhs_comment_match',
+      'xhs_comment_like',
+      'xhs_comment_reply',
+      'xhs_feed_like',
+      'xhs_feed_like_tab_switch',
+    ]);
+    if (SELF_TERMINATING_ACTIONS.has(action)) return 0;
+
     const action = String(operation?.action || '').trim().toLowerCase();
     if (action === 'wait') {
       const ms = Math.max(0, Number(operation?.params?.ms ?? operation?.params?.value ?? 0) || 0);
