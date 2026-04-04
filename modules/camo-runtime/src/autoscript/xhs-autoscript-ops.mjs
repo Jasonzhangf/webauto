@@ -237,7 +237,7 @@ export function buildXhsFeedLikeOperations(options = {}) {
       trigger: 'search_result_item.exist',
       dependsOn: ['submit_search'],
       once: true, // 单次长运行，内部自行管理 Tab 轮转
-      timeoutMs: 1800000, // 30 分钟总超时
+      disableTimeout: true,
       retry: { attempts: 1, backoffMs: 0 },
       impact: 'script',
       onFailure: 'stop_all',

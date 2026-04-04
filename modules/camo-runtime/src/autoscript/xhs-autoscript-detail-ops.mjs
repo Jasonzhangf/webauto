@@ -129,7 +129,7 @@ export function buildXhsDetailOperations(options) {
       conditions: modalExistConditions,
       once: false,
       oncePerAppear: modalChainOncePerAppear,
-      timeoutMs: 90000,
+      disableTimeout: true,
       retry: { attempts: 1, backoffMs: 0 },
       impact: 'op',
       onFailure: 'continue',

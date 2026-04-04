@@ -1,3 +1,9 @@
+---
+name: webauto-dev
+description: WebAuto development workflow, architecture rules, and verification process
+version: 1.0
+---
+
 # WebAuto Dev Skill (Project-Specific)
 # Path: .agents/skills/webauto-dev/SKILL.md
 
