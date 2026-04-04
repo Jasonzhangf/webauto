@@ -9,8 +9,7 @@ import { BROWSER_SERVICE_URL, loadConfig, setRepoRoot } from './config.mjs';
 
 const requireFromHere = createRequire(import.meta.url);
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_API_TIMEOUT_MS = 15000;
-const DEFAULT_API_TIMEOUT_MULTIPLIER = 1;
+// Timeout logic unified in shared/api-client.mjs (single source of truth)
 
 function resolveNodeBin() {
   const explicit = String(process.env.CAMO_NODE_BIN || '').trim();
@@ -56,75 +55,7 @@ function runCamoCli(args = [], options = {}) {
   };
 }
 
-function resolveApiTimeoutMs(options = {}) {
-  const optionValue = Number(options?.timeoutMs);
-  const optionMultiplier = Number(options?.timeoutMultiplier);
-  const envMultiplier = Number(process.env.CAMO_API_TIMEOUT_MULTIPLIER || '');
-  const timeoutMultiplier = Number.isFinite(optionMultiplier) && optionMultiplier >= 1
-    ? Math.floor(optionMultiplier)
-    : (Number.isFinite(envMultiplier) && envMultiplier >= 1
-      ? Math.floor(envMultiplier)
-      : DEFAULT_API_TIMEOUT_MULTIPLIER);
-  const normalizeTimeout = (value) => {
-    const n = Number(value);
-    if (!Number.isFinite(n) || n <= 0) return 0;
-    return Math.max(1000, Math.floor(n));
-  };
-  const applyMultiplier = (value) => {
-    const normalized = normalizeTimeout(value);
-    if (normalized <= 0) return 0;
-    return Math.min(15 * 60 * 1000, normalized * timeoutMultiplier);
-  };
-  if (Number.isFinite(optionValue) && optionValue > 0) {
-    return applyMultiplier(optionValue);
-  }
-  const envValue = Number(process.env.CAMO_API_TIMEOUT_MS);
-  if (Number.isFinite(envValue) && envValue > 0) {
-    return applyMultiplier(envValue);
-  }
-  return applyMultiplier(DEFAULT_API_TIMEOUT_MS);
-}
-
-function isTimeoutError(error) {
-  const name = String(error?.name || '').toLowerCase();
-  const message = String(error?.message || '').toLowerCase();
-  return (
-    name.includes('timeout')
-    || name.includes('abort')
-    || message.includes('timeout')
-    || message.includes('timed out')
-    || message.includes('aborted')
-  );
-}
-
-export async function callAPI(action, payload = {}, options = {}) {
-  const timeoutMs = resolveApiTimeoutMs(options);
-  let r;
-  try {
-    r = await fetch(`${BROWSER_SERVICE_URL}/command`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, args: payload }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-  } catch (error) {
-    if (isTimeoutError(error)) {
-      throw new Error(`browser-service timeout after ${timeoutMs}ms: ${action}`);
-    }
-    throw error;
-  }
-
-  let body;
-  try {
-    body = await r.json();
-  } catch {
-    const text = await r.text();
-    throw new Error(`HTTP ${r.status}: ${text}`);
-  }
-
-  if (!r.ok) throw new Error(body?.error || `HTTP ${r.status}`);
-  return body;
-}
+export { callAPI } from '../../autoscript/shared/api-client.mjs';
 
 export async function getSessionByProfile(profileId) {
   const status = await callAPI('getStatus', {});

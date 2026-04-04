@@ -9,7 +9,7 @@ export const BROWSER_SERVICE_URL =
   || process.env.CAMO_BROWSER_HTTP_URL
   || 'http://127.0.0.1:7704';
 
-const DEFAULT_API_TIMEOUT_MS = 15000;
+const DEFAULT_API_TIMEOUT_MS = 30000;
 const DEFAULT_API_TIMEOUT_MULTIPLIER = 1;
 
 function resolveApiTimeoutMs(options = {}) {
