@@ -65,6 +65,7 @@ export function writeDetailSlotState(state, tabIndex, patch = {}) {
   const slotIndex = Number(tabIndex || 1) || 1;
   const detailState = ensureDetailLinkState(state);
   const key = String(slotIndex);
+  // Preserve resumeAnchor from current slot when patch doesn't explicitly set it
   const current = detailState.activeByTab[key] && typeof detailState.activeByTab[key] === 'object'
     ? detailState.activeByTab[key]
     : {};
@@ -78,6 +79,27 @@ export function writeDetailSlotState(state, tabIndex, patch = {}) {
   };
   detailState.activeByTab[key] = next;
   return { ...next };
+}
+
+/**
+ * Reset (delete) the detail slot after completed/failed.
+ * Used by close_detail when the link is done (not paused).
+ * This removes the slot from activeByTab and clears related state.
+ */
+export function resetDetailLinkSlot(state, tabIndex, extra = {}) {
+  const slotIndex = Number(tabIndex || 1) || 1;
+  const detailState = ensureDetailLinkState(state);
+  const key = String(slotIndex);
+  delete detailState.activeByTab[key];
+  detailState.activeTabIndex = null;
+  detailState.activeLink = null;
+  detailState.activeLinkRetryCount = 0;
+  detailState.activeFailed = false;
+  if (extra.queueResult) {
+    detailState.lastQueueOutcome = extra.queueResult;
+  }
+  detailState.lastClosedAt = new Date().toISOString();
+  return { ok: true, reset: true, tabIndex: slotIndex };
 }
 
 export function markDetailSlotProgress(state, params = {}, outcome = {}) {

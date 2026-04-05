@@ -6,7 +6,7 @@ import { buildTraceRecorder, emitActionTrace } from '../../shared/trace.mjs';
 import { sleep, readLocation, clickPoint } from './dom-ops.mjs';
 import { readSearchCandidateByNoteId, readSearchCandidates, ensureSearchCandidateFullyVisible } from './search-ops.mjs';
 import { getCurrentTabIndex, loadCollectedLinks, readCollectedLinksCache, readActiveLinkForTab, writeTabSlotState } from './tab-state.mjs';
-import { readDetailSlotState, shouldCloseCurrentDetail, shouldReuseDetailForCurrentTab, writeDetailSlotState } from './detail-slot-state.mjs';
+import { readDetailSlotState, resetDetailLinkSlot, shouldCloseCurrentDetail, shouldReuseDetailForCurrentTab, writeDetailSlotState } from './detail-slot-state.mjs';
 import { isDetailVisible, readDetailCloseTarget, closeDetailToSearch, readDetailSnapshot } from './detail-ops.mjs';
 import { readXhsInteractionGuard, buildXhsGuardFailure } from './auth-ops.mjs';
 import { captureOperationFailure } from './diagnostic-ops.mjs';
@@ -1159,15 +1159,18 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
     const tabIndex = Number(state?.detailLinkState?.activeTabIndex || getCurrentTabIndex(state, { tabCount: params.tabCount })) || 1;
     const activeSlot = readDetailSlotState(state, tabIndex, { tabCount: params.tabCount });
     const activeEntry = readActiveLinkForTab(state, tabIndex);
-    if (!shouldCloseCurrentDetail(state, { tabCount: params.tabCount, openByLinks: true })) {
-      emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
-      return {
-        ok: true,
-        code: 'OPERATION_DONE',
-        message: 'xhs_close_detail deferred for tab rotation',
-        data: { closed: false, method: 'deferred_rotation', attempts: 0 },
-      };
-    }
+   if (!shouldCloseCurrentDetail(state, { tabCount: params.tabCount, openByLinks: true })) {
+     emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
+      // PAUSED: preserve slot state (resumeAnchor) and keep link in claimed set.
+      // Do NOT release or delete — the link will be resumed when this tab is
+      // visited again after rotation.
+     return {
+       ok: true,
+       code: 'OPERATION_DONE',
+       message: 'xhs_close_detail deferred for tab rotation',
+       data: { closed: false, method: 'deferred_rotation', attempts: 0 },
+     };
+   }
 
     const initialVisible = await isDetailVisibleImpl(profileId).catch(() => null);
     const shouldRequeueFailedLink = requeueFailedLinks
@@ -1206,20 +1209,11 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
           testingOverrides,
           noteId: state.currentNoteId || activeSlot?.lastOpenedNoteId || null,
           url: state.currentHref || activeSlot?.lastOpenedHref || null,
-        }));
-    const detailState = state.detailLinkState && typeof state.detailLinkState === 'object' ? state.detailLinkState : {};
-    const activeByTab = detailState.activeByTab && typeof detailState.activeByTab === 'object' ? { ...detailState.activeByTab } : {};
-    delete activeByTab[String(tabIndex)];
-    state.detailLinkState = {
-      ...detailState,
-      activeByTab,
-      activeTabIndex: null,
-      activeLink: null,
-      activeLinkRetryCount: 0,
-      activeFailed: false,
-      lastQueueOutcome: queueResult,
-      lastClosedAt: new Date().toISOString(),
-    };
+    }));
+    // Completed/Failed: release link claim and delete slot.
+    // This path is only reached when shouldCloseCurrentDetail()=true,
+    // meaning the link is NOT paused.
+    resetDetailLinkSlot(state, tabIndex, { queueResult });
     emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
     if (!initialVisible?.detailVisible) {
       return {
@@ -1382,19 +1376,8 @@ export async function executeCloseDetailOperation({ profileId, params = {}, cont
         noteId: state.currentNoteId || activeSlot?.lastOpenedNoteId || null,
         url: state.currentHref || activeSlot?.lastOpenedHref || null,
       });
-    const detailState = state.detailLinkState && typeof state.detailLinkState === 'object' ? state.detailLinkState : {};
-    const activeByTab = detailState.activeByTab && typeof detailState.activeByTab === 'object' ? { ...detailState.activeByTab } : {};
-    delete activeByTab[String(tabIndex)];
-    state.detailLinkState = {
-      ...detailState,
-      activeByTab,
-      activeTabIndex: null,
-      activeLink: null,
-      activeLinkRetryCount: 0,
-      activeFailed: false,
-      lastQueueOutcome: queueResult,
-      lastClosedAt: new Date().toISOString(),
-    };
+    // Completed/Failed: release link claim and reset slot.
+    resetDetailLinkSlot(state, tabIndex, { queueResult });
   }
 
   emitActionTrace(context, actionTrace, { stage: 'xhs_close_detail' });
