@@ -645,10 +645,10 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
           pushTrace({ kind: 'cleanup', stage: 'open_detail_done_cleanup', result: cleanupResult });
           emitActionTrace(context, actionTrace, { stage: 'xhs_open_detail' });
           throw new Error('AUTOSCRIPT_DONE_DETAIL_LINKS_EXHAUSTED');
-        }
-        // Preserve original xsec_source/source when available; avoid overriding to web_explore_feed
-        effectiveNoteUrl = String(link.noteUrl)
-          .replace('/search_result/', '/explore/');
+       }
+       // Preserve original xsec_source/source when available; avoid overriding to web_explore_feed
+        effectiveNoteUrl = String((assignedLink || link).noteUrl)
+         .replace('/search_result/', '/explore/');
       }
 
       const activeEntry = useLinks
