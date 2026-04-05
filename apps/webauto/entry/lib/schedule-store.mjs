@@ -10,6 +10,13 @@ const SUPPORTED_COMMAND_TYPES = [
   'weibo-timeline',
   'weibo-user-profile',
 ];
+const ALWAYS_ON_COMMAND_TYPES = [
+  'xhs-producer',
+  'xhs-consumer',
+  'weibo-producer',
+  'weibo-consumer',
+];
+const ALL_SUPPORTED_COMMAND_TYPES = [...SUPPORTED_COMMAND_TYPES, ...ALWAYS_ON_COMMAND_TYPES];
 const DEFAULT_INTERVAL_MINUTES = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const POLICY_FILE = 'policy.json';
@@ -464,8 +471,8 @@ function normalizeCommandArgv(value) {
 
 function validateCommand(task) {
   const commandType = String(task.commandType || DEFAULT_COMMAND_TYPE).trim();
-  if (!SUPPORTED_COMMAND_TYPES.includes(commandType)) {
-    throw new Error(`unsupported commandType: ${commandType}. Supported: ${SUPPORTED_COMMAND_TYPES.join(', ')}`);
+  if (!ALL_SUPPORTED_COMMAND_TYPES.includes(commandType)) {
+    throw new Error(`unsupported commandType: ${commandType}. Supported: ${ALL_SUPPORTED_COMMAND_TYPES.join(', ')}`);
   }
   const argv = task.commandArgv && typeof task.commandArgv === 'object' ? task.commandArgv : {};
   const platform = commandType.split('-')[0];

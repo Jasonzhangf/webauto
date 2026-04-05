@@ -822,9 +822,37 @@ async function main() {
     return;
   }
 
-  // Handle weibo-user-profile from schedule daemon
-  if (cmd === "weibo-user-profile") {
-    const script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
+ // Handle weibo-user-profile from schedule daemon
+ if (cmd === "weibo-user-profile") {
+   const script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
+   await run(process.execPath, [script, ...rawArgv.slice(1)]);
+   return;
+ }
+
+  // Handle weibo-producer from schedule daemon
+  if (cmd === "weibo-producer") {
+    const script = path.join(ROOT, "apps", "webauto", "entry", "weibo-producer-runner.mjs");
+    await run(process.execPath, [script, ...rawArgv.slice(1)]);
+    return;
+  }
+
+  // Handle weibo-consumer from schedule daemon
+  if (cmd === "weibo-consumer") {
+    const script = path.join(ROOT, "apps", "webauto", "entry", "weibo-consumer-runner.mjs");
+    await run(process.execPath, [script, ...rawArgv.slice(1)]);
+    return;
+  }
+
+  // Handle xhs-producer from schedule daemon
+  if (cmd === "xhs-producer") {
+    const script = path.join(ROOT, "apps", "webauto", "entry", "xhs-producer-runner.mjs");
+    await run(process.execPath, [script, ...rawArgv.slice(1)]);
+    return;
+  }
+
+  // Handle xhs-consumer from schedule daemon
+  if (cmd === "xhs-consumer") {
+    const script = path.join(ROOT, "apps", "webauto", "entry", "xhs-consumer-runner.mjs");
     await run(process.execPath, [script, ...rawArgv.slice(1)]);
     return;
   }
@@ -989,8 +1017,20 @@ async function main() {
       return;
     }
 
-   if (subNormalized === 'collect') {
-     const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-collect.mjs');
+  if (subNormalized === 'collect') {
+    const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-collect.mjs');
+    await run(process.execPath, [script, ...rawArgv.slice(2)]);
+    return;
+  }
+
+   if (subNormalized === 'producer') {
+     const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-producer-runner.mjs');
+     await run(process.execPath, [script, ...rawArgv.slice(2)]);
+     return;
+   }
+
+   if (subNormalized === 'consumer') {
+     const script = path.join(ROOT, 'apps', 'webauto', 'entry', 'xhs-consumer-runner.mjs');
      await run(process.execPath, [script, ...rawArgv.slice(2)]);
      return;
    }
@@ -1127,4 +1167,3 @@ main()
     console.error(err?.stack || err?.message || String(err));
     process.exit(1);
   });
-
