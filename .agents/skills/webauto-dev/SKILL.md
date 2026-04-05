@@ -265,3 +265,103 @@ if (SELF_TERMINATING_ACTIONS.has(action)) return 0; // 无超时
 - 同一帖子在同一 tab 反复出现且 used 不重置
 - 采集数据为空或格式异常
 - 任务启动后长时间无任何数据产出（5 分钟以上）
+
+---
+
+## VIII. Tab 轮转设计规范（硬约束）
+
+### 核心原则
+
+Tab 轮转的目的：用多 tab 并行采集，每个 tab 有预算上限（如 50 条评论），预算耗尽后切换到下一个 tab，最终所有 tab 轮转一圈后回到原 tab 继续采集未完成的帖子。
+
+### 关键函数职责
+
+| 函数 | 职责 | 何时调用 |
+|------|------|----------|
+| consumeTabBudget | 累加当前 tab 的 used 计数 | 每次评论采集后 |
+| shouldPauseForTabBudget | 检查 used >= limit | comments_harvest 结束时 |
+| advanceTabAndReset | 切换 tab + 重置 used | tab_switch_if_needed |
+| readDetailSlotState | 读取当前 tab 的 slot 状态 | open_next_detail |
+| resetDetailLinkSlot | 删除 slot + 清理状态 | close_detail (completed/failed) |
+
+### 生命周期状态转换
+
+[新帖子] → open_detail → [active] → comments_harvest → used >= limit? → [paused]
+[paused] → saveResumeAnchor → tab_switch → 切换到其他 tab
+[其他 tab 完成] → tab_switch → 回到原 tab → open_next_detail 检测 paused+resumeAnchor → [resumed]
+[resumed] → comments_harvest 继续采集 → 到底? → [completed] → resetDetailLinkSlot
+
+### 常见错误模式
+
+**错误 1：PAUSED 时误删 slot**
+finalize_detail_link 返回 deferred_rotation 后必须 return，否则后续 delete activeByTab 会误删 paused 状态。
+修复：PAUSED 路径 return 后不执行后续清理，只有 completed/failed 才调用 resetDetailLinkSlot。
+
+**错误 2：advanceTab 时 used 未重置**
+只重置目标 tab 不重置当前 tab，导致 used 累积。
+修复：advanceTabAndReset 离开和进入都清零 used。
+
+### 验证检查点
+
+日志中搜索：
+- method=deferred_rotation：PAUSED 正确返回
+- reused=True：成功恢复暂停帖子
+- tab_switch tab=N target=M：tab 切换正确
+- 同一 noteId 在不同时间出现多次 = 轮转恢复成功
+
+---
+
+## IX. 经验教训记录（持续更新）
+
+### 2026-04-05：Tab 轮转恢复失败
+
+**问题**：Tab 1 采集帖子 A，预算耗尽 PAUSED → 切换到 Tab 2 → 回到 Tab 1 时没有恢复帖子 A，取了新帖子 B。
+
+**根因**：finalize_detail_link 在 PAUSED 时返回 deferred_rotation 后，旧代码继续执行 delete activeByTab[tabIndex]，把 slot 状态全删了。
+
+**修复**：
+1. PAUSED 路径 return 后不再执行后续清理
+2. 只有 completed/failed 才调用 resetDetailLinkSlot
+3. open_next_detail 检测到 paused+resumeAnchor 时跳过 claim，直接用旧 link
+
+**教训**：
+- 状态清理逻辑必须明确区分 PAUSED 和 COMPLETED
+- PAUSED 意味着暂停但未完成，slot 必须保留
+- 测试时检查 reused=True 是否出现，验证恢复路径
+
+### 2026-04-05：超时统一架构
+
+**问题**：operation timeout 60s 截断了大评论帖（200+ 条）的采集，覆盖率只有 12-83%。
+
+**根因**：超时策略分散在 3 处（runtime.mjs / browser-service.mjs / input-pipeline），改一处不改其他无效。
+
+**修复**：
+1. 统一到 shared/api-client.mjs（DEFAULT_API_TIMEOUT_MS = 30s）
+2. runtime.mjs 白名单（SELF_TERMINATING_ACTIONS）return 0
+3. camo input-pipeline 也改为 30s
+
+**教训**：
+- 自终止操作（循环采集）不需要超时，有自己的退出机制
+- 超时只用于单次基础设施调用（CDP/HTTP）
+- 测试时检查 operation_error 中是否有 TIMEOUT
+
+### 2026-04-04：SKILL.md YAML frontmatter
+
+**问题**：webauto-dev skill 加载失败，报 missing YAML frontmatter delimited by ---。
+
+**根因**：.agents/skills/webauto-dev/SKILL.md 第一行不是 ---，Codex 无法解析。
+
+**修复**：在文件开头加上 YAML frontmatter（name/description/version）。
+
+**教训**：所有 .agents/skills/*/SKILL.md 必须以 YAML frontmatter 开头。
+
+---
+
+## X. 待验证修改记录
+
+| # | 修改内容 | 文件 | 状态 | E2E 任务 ID |
+|---|----------|------|------|-------------|
+| 1 | 移除自终止业务操作超时（8 个 action 返回 0） | runtime.mjs | ✅ 验证通过 | job_1775319270899_63a02cef |
+| 2 | 超时统一到 shared/api-client.mjs（30s 默认） | shared/api-client.mjs, browser-service.mjs | ✅ 验证通过 | job_1775319270899_63a02cef |
+| 3 | Tab 轮转恢复暂停帖子 | detail-flow-ops.mjs, detail-slot-state.mjs | ✅ 验证通过 | job_1775386786117_cc64cb73 |
+| 4 | weibo 切换 shared 导入 | weibo/*.mjs | ⏳ 待 E2E | - |
