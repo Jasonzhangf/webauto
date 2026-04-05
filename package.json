@@ -31,7 +31,7 @@
     "!services/**/*.map"
   ],
   "dependencies": {
-    "@web-auto/camo": "^0.2.4",
+    "@web-auto/camo": "^0.3.1",
     "ajv": "^8.18.0",
     "esbuild-register": "^3.6.0",
     "iconv-lite": "^0.6.3",

@@ -55,7 +55,8 @@ function runCamoCli(args = [], options = {}) {
   };
 }
 
-export { callAPI } from '../../autoscript/shared/api-client.mjs';
+import { callAPI } from '../autoscript/shared/api-client.mjs';
+export { callAPI };
 
 export async function getSessionByProfile(profileId) {
   const status = await callAPI('getStatus', {});

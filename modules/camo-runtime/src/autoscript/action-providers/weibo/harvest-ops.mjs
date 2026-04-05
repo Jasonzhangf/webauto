@@ -3,10 +3,10 @@ import { readCommentPanelState, scrollCommentsToBottom, extractComments, isComme
 import { executeOpenDetailOperation, executeCloseDetailOperation } from './detail-flow-ops.mjs';
 import { sleep, devtoolsEval } from './common.mjs';
 import { getWeiboProfileState } from './state.mjs';
-import { buildTraceRecorder } from './trace.mjs';
+import { buildTraceRecorder } from '../../shared/trace.mjs';
 import path from 'node:path';
-import { captureScreenshotToFile, sanitizeFileComponent } from './diagnostic-utils.mjs';
-import { ensureDir } from './persistence.mjs';
+import { captureScreenshotToFile, sanitizeFileComponent } from '../../shared/diagnostic-utils.mjs';
+import { ensureDir } from '../../shared/persistence.mjs';
 
 export async function downloadWithRetry(url, destDir, index, maxRetries = 3) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {

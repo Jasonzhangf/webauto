@@ -1,4 +1,4 @@
-import { execSync, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
 
 function runCamo(args, opts = {}) {
   const timeoutMs = opts.timeoutMs || 30000;
@@ -14,9 +14,9 @@ function runCamo(args, opts = {}) {
   }
 }
 
-export function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+export { runCamo };
+
+export { sleep } from '../../shared/dom-ops.mjs';
 
 export function parseDevtoolsJson(stdout) {
   const text = String(stdout || '').trim();
