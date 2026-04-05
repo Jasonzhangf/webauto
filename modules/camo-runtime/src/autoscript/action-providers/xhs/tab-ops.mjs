@@ -1,6 +1,6 @@
 import { callAPI } from '../../../utils/browser-service.mjs';
 import { getProfileState } from './state.mjs';
-import { ensureTabState, getCurrentTabIndex, advanceTab } from './tab-state.mjs';
+import { ensureTabState, getCurrentTabIndex, advanceTabAndReset, resetTabBudget } from './tab-state.mjs';
 import { shouldAdvanceAfterClose } from './detail-slot-state.mjs';
 
 const XHS_DISCOVER_URL = 'https://www.xiaohongshu.com/explore?channel_id=homefeed_recommend';
@@ -330,7 +330,7 @@ export async function executeSwitchTabIfNeeded({ profileId, params = {}, context
   }
 
   // 切换到下一个 tab
-  const next = advanceTab(state, {
+  const next = advanceTabAndReset(state, {
     tabCount: tabState.tabCount,
     commentBudget: tabState.limit
   });

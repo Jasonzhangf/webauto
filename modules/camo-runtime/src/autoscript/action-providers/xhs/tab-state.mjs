@@ -65,6 +65,23 @@ export function getCurrentTabIndex(state, params = {}) {
   return Math.max(1, Math.min(tab.tabCount, Number(tab.cursor) || 1));
 }
 
+/**
+ * 重置指定 tab 的预算计数器
+ * @param {object} state - Profile state
+ * @param {number} tabIndex - Tab index (1-based)
+ * @returns {object} - Updated tab state
+ */
+export function resetTabBudget(state, tabIndex) {
+  const tab = ensureTabState(state, {});
+  const idx = Math.max(0, Math.min(tab.tabCount - 1, (tabIndex || 1) - 1));
+  tab.used[idx] = 0;
+  return {
+    tabIndex: idx + 1,
+    used: tab.used[idx],
+    limit: tab.limit,
+  };
+}
+
 export function consumeTabBudget(state, count = 0, params = {}) {
   const tab = ensureTabState(state, params);
   const index = getCurrentTabIndex(state, params) - 1;
@@ -79,15 +96,28 @@ export function consumeTabBudget(state, count = 0, params = {}) {
   };
 }
 
-export function advanceTab(state, params = {}) {
+/**
+ * 切换到下一个 Tab，并清零当前 Tab 和目标 Tab 的预算计数器。
+ * 根据 Tab 轮转设计文档：
+ *   - 离开当前 Tab 时立即清零 used[current]
+ *   - 进入目标 Tab 时也清零 used[next]
+ *   - 无条件清零，简单可靠
+ */
+export function advanceTabAndReset(state, params = {}) {
   const tab = ensureTabState(state, params);
   const current = getCurrentTabIndex(state, params);
+  // 离开当前 Tab 时立即清零
+  const currentIdx = current - 1;
+  tab.used[currentIdx] = 0;
+
+  // 切换到下一个 Tab
   const next = (current % tab.tabCount) + 1;
   tab.cursor = next;
+
+  // 进入目标 Tab 时也清零
   const nextIdx = next - 1;
-  if (tab.limit > 0 && Number(tab.used[nextIdx] || 0) >= tab.limit) {
-    tab.used[nextIdx] = 0;
-  }
+  tab.used[nextIdx] = 0;
+
   return {
     tabIndex: next,
     used: tab.used[nextIdx],
