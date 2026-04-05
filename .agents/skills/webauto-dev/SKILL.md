@@ -437,3 +437,72 @@ finalize_detail_link 返回 deferred_rotation 后必须 return，否则后续 de
 
 - `platform.js` 已创建骨架，用于 Windows 下 non-CDP fallback
 - 当前 Mac/Linux 走 CDP 路径，Windows 待实现 WebSocket/HTTP 直连
+
+## XIII. Clock 定时工具使用规则（2026-04-06）✅
+
+### 强制规则
+
+**任何超过 2 分钟的等待必须使用 `clock.schedule`，禁止使用 `sleep` 或轮询。**
+
+### 正确用法
+
+```bash
+# 30 分钟巡检，共 8 轮
+clock schedule \
+  --due-at "$(date -u -v+30M +%Y-%m-%dT%H:%M:%S%z)" \
+  --task "巡检 E2E 任务：检查进度、错误、覆盖率" \
+  --clockMdSection "## 巡检记录" \
+  --recurrence "interval:30m,maxRuns:8"
+```
+
+### 错误示例
+
+```bash
+# ❌ 禁止：长时间 sleep
+sleep 1800  # 等待 30 分钟
+
+# ❌ 禁止：轮询脚本
+while true; do check_status; sleep 60; done
+```
+
+### Clock.md 格式
+
+```markdown
+## 背景
+E2E 压力测试验证 camo@0.3.4 修复效果
+
+## 当前阻塞点
+等待任务完成（预计 2-4 小时）
+
+## 下次提醒要做的第一步
+1. 检查 daemon status
+2. 读取 job 日志最后 100 行
+3. 统计 operationErrors（TIMEOUT 计数）
+4. 更新"## 巡检记录"
+
+## 不能忘的检查项
+- keyboard:press timeout 应为 0
+- evaluate timeout 应为 0
+- 覆盖率 > 90%
+```
+
+### 巡检记录格式
+
+```markdown
+## 巡检记录
+
+- [HH:MM] 第 N 次巡检（clock 定时）
+  - Job: job_xxx
+  - 状态：running/completed/failed
+  - 进度：X/50 notes
+  - 错误：N 个 operationErrors
+  - TIMEOUT: N 个
+  - 下次巡检：HH:MM
+```
+
+### 规则原因
+
+1. **非阻塞**：clock 是后台定时，任务可继续执行其他工作
+2. **持久化**：clock.md 记录完整巡检历史，便于事后审计
+3. **自愈**：即使终端断开，clock 仍会触发提醒
+4. **可追溯**：每次巡检 append-only，不覆盖历史
