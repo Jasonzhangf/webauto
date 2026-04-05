@@ -365,3 +365,25 @@ finalize_detail_link 返回 deferred_rotation 后必须 return，否则后续 de
 | 2 | 超时统一到 shared/api-client.mjs（30s 默认） | shared/api-client.mjs, browser-service.mjs | ✅ 验证通过 | job_1775319270899_63a02cef |
 | 3 | Tab 轮转恢复暂停帖子 | detail-flow-ops.mjs, detail-slot-state.mjs | ✅ 验证通过 | job_1775386786117_cc64cb73 |
 | 4 | weibo 切换 shared 导入 | weibo/*.mjs | ⏳ 待 E2E | - |
+
+## XI. CDP 拥堵与双队列架构（2026-04-05）
+
+### 问题
+- `evaluate()` 直接走 CDP 无锁，subscription polling（500ms×6）堵塞 `keyboard:press`
+- 导致 input 操作延迟 70+ 秒，30s 超时误报
+
+### 解决
+- **双队列分离**：Input Lock（keyboard/mouse）+ Read Lock（evaluate/query）
+- **Subscription 降频**：500ms → 2000ms
+- **Health API**：`/health` 返回 `inputPipeline` + `readPipeline` 状态
+
+### 规则
+1. 所有 `page.evaluate()` 必须走 `withReadLock`
+2. 所有 `keyboard:press`/`mouse:click` 走 `withInputActionLock`
+3. 两个队列独立，互不阻塞
+4. Read 操作有 10s 硬超时熔断
+5. Windows 下 CDP 不稳定，需要 non-CDP fallback（platform.js 骨架已创建）
+
+### 验证
+- `curl http://127.0.0.1:7704/health` → 检查两个 pipeline 的 `healthy` 状态
+- keyboard:press latency 应 < 3s（P99）
