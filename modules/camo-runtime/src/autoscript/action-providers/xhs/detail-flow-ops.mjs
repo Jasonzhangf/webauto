@@ -580,7 +580,8 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
      if (useLinks && !effectiveNoteUrl) {
         // Resume paused note on current tab: if this tab has a paused note
         // with resumeAnchor, restore it instead of claiming a new link.
-        const preClaimSlot = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
+       const preClaimSlot = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
+        let link = null;
         if (preClaimSlot?.paused === true && preClaimSlot?.resumeAnchor && preClaimSlot?.link?.noteUrl) {
           pushTrace({ kind: 'resume_paused_note', tabIndex: currentTabIndex, noteId: preClaimSlot.link.noteId });
           assignedLink = preClaimSlot.link;
@@ -589,18 +590,18 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
           effectiveNoteUrl = String(assignedLink.noteUrl).replace('/search_result/', '/explore/');
           // Do NOT claim a new link — skip claimDetailLinkForTab
         } else {
-       const claim = await claimDetailLinkForTab({
-         profileId,
-         params,
-         state,
-         currentTabIndex,
-         pushTrace,
-         testingOverrides,
-       });
-       const link = claim?.link || null;
-       assignedLink = link;
-       slotState = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
-       }
+      const claim = await claimDetailLinkForTab({
+        profileId,
+        params,
+        state,
+        currentTabIndex,
+        pushTrace,
+        testingOverrides,
+      });
+      link = claim?.link || null;
+      assignedLink = link;
+      slotState = readDetailSlotState(state, currentTabIndex, { tabCount: params.tabCount });
+      }
       
         const checkLink = assignedLink || link;
         if (!checkLink?.noteUrl) {
