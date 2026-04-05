@@ -387,3 +387,53 @@ finalize_detail_link 返回 deferred_rotation 后必须 return，否则后续 de
 ### 验证
 - `curl http://127.0.0.1:7704/health` → 检查两个 pipeline 的 `healthy` 状态
 - keyboard:press latency 应 < 3s（P99）
+
+## XII. CDP 拥堵修复验证（2026-04-06）✅
+
+### 问题根因
+- **Subscription polling 过频**：500ms × 6 selectors = 每秒 12+ 次 `page.evaluate()`
+- **evaluate 无锁**：直接走 CDP，与 keyboard:press 共享连接，造成队头阻塞
+- **现象**：keyboard:press 延迟 70+ 秒，30s 超时误报 35 次
+
+### 修复方案（camo@0.3.4）
+
+| 修复 | 文件 | 效果 |
+|------|------|------|
+| **Read Lock 队列** | `input-pipeline.js` | evaluate/query 走独立队列，10s 熔断 |
+| **evaluate 包裹 withReadLock** | `BrowserSession.js` | 不再堵塞 input 队列 |
+| **Subscription 降频** | `subscription.mjs` | 500ms → 2000ms（-75% CDP 压力） |
+| **Health API** | `browser-service/index.js` | `/health` 返回双 pipeline 状态 |
+
+### 架构设计
+
+```
+┌───────────────────────────────────────────┐
+│           CDP Connection                  │
+├─────────────────┬─────────────────────────┤
+│ Input Queue     │ Read Queue              │
+│ (keyboard/mouse)│ (evaluate/query)        │
+│ withInputLock   │ withReadLock            │
+│ 15s timeout     │ 10s timeout             │
+└─────────────────┴─────────────────────────┘
+```
+
+### E2E 验证结果
+
+| 指标 | 修复前 (0.3.3) | 修复后 (0.3.4) |
+|------|---------------|---------------|
+| keyboard:press timeout | 35 | **0** ✅ |
+| evaluate timeout | 0 | **0** ✅ |
+| Total operation errors | 35 | **0** ✅ |
+| Subscription 频率 | 360/min | **90/min** ✅ |
+
+### 规则更新（强制）
+
+1. **所有 `page.evaluate()` 必须走 `withReadLock`** — 直接调用 CDP 视为架构违规
+2. **Subscription throttle 不得低于 2000ms** — 除非有特殊风控绕过需求
+3. **Health 检查**：`curl http://127.0.0.1:7704/health` 应返回 `inputPipeline.healthy=true` + `readPipeline.healthy=true`
+4. **P99 latency 监控**：keyboard:press 应 < 3s，超过 5s 需告警
+
+### Windows 兼容性
+
+- `platform.js` 已创建骨架，用于 Windows 下 non-CDP fallback
+- 当前 Mac/Linux 走 CDP 路径，Windows 待实现 WebSocket/HTTP 直连
