@@ -12,6 +12,71 @@
 import { callAPI } from './api-client.mjs';
 
 // ---------------------------------------------------------------------------
+// Post-anchor verification
+// ---------------------------------------------------------------------------
+
+/**
+ * Error thrown when post-anchor verification fails.
+ */
+export class AnchorError extends Error {
+  constructor(code, anchor, details = {}) {
+    super(`Anchor verification failed: ${code}`);
+    this.name = 'AnchorError';
+    this.code = code;
+    this.anchor = anchor;
+    this.details = details;
+  }
+}
+
+/**
+ * Verify page state after a DOM write operation.
+ * @param {string} profileId
+ * @param {object} anchor - Anchor configuration
+ * @param {string} anchor.type - 'exist' | 'visible' | 'not_exist' | 'url_contains'
+ * @param {string} [anchor.selector] - CSS selector
+ * @param {number} [anchor.minCount=1] - Minimum count for visible
+ * @param {string} [anchor.urlPattern] - URL pattern for url_contains
+ * @param {number} [anchor.timeoutMs=5000] - Max wait time
+ * @returns {Promise<{ok: boolean, error?: string}>}
+ */
+export async function verifyPostAnchor(profileId, anchor) {
+  if (!anchor || !anchor.type) return { ok: true };
+  const timeoutMs = Math.max(100, Number(anchor.timeoutMs) || 5000);
+  const startTime = Date.now();
+  while (Date.now() - startTime < timeoutMs) {
+    try {
+      const result = await callAPI('evaluate', {
+        profileId,
+        script: buildAnchorCheckScript(anchor),
+      });
+      if (result?.ok && result?.result?.passed) return { ok: true };
+      if (result?.result?.isLoginPage) return { ok: false, error: 'login_required' };
+      if (result?.result?.isRiskControl) return { ok: false, error: 'risk_control' };
+    } catch (e) { /* continue polling */ }
+    await sleep(200);
+  }
+  return { ok: false, error: 'timeout' };
+}
+
+function buildAnchorCheckScript(anchor) {
+  const { type, selector, minCount = 1, urlPattern } = anchor;
+  if (type === 'exist') {
+    return `(\(\) => ({ passed: document.querySelectorAll(\"${selector}\").length > 0 }))()`;
+  }
+  if (type === 'visible') {
+    return `(\(\) => { const els = Array.from(document.querySelectorAll(\"${selector}\")).filter(e => e.offsetParent !== null); return { passed: els.length >= ${minCount}, count: els.length }; })()`;
+  }
+  if (type === 'not_exist') {
+    return `(\(\) => ({ passed: document.querySelectorAll(\"${selector}\").length === 0 }))()`;
+  }
+  if (type === 'url_contains') {
+    return `(\(\) => ({ passed: location.href.includes(\"${urlPattern}\") }))()`;
+  }
+  return `(\(\) => ({ passed: false }))()`;
+}
+
+
+// ---------------------------------------------------------------------------
 // Low-level utilities
 // ---------------------------------------------------------------------------
 
@@ -81,6 +146,7 @@ export async function clickPoint(profileId, point, options = {}) {
   const nudgeBefore = options && options.nudgeBefore === true;
   const retryOnFailure = options && options.retryOnFailure !== false && !nudgeBefore;
   const timeoutMs = Math.max(0, Number((options && options.timeoutMs) || 0));
+  const postAnchor = options && options.postAnchor;
   const payload = {
     profileId,
     x: Math.max(1, Math.round(Number((point && point.x) || 1))),
@@ -99,6 +165,14 @@ export async function clickPoint(profileId, point, options = {}) {
   }
   const waitMs = Math.max(0, Number((options && options.afterClickSleepMs) || 0));
   if (waitMs > 0) await sleep(waitMs);
+
+  // Post-anchor verification
+  if (postAnchor) {
+    const anchorResult = await verifyPostAnchor(profileId, postAnchor);
+    if (!anchorResult.ok) {
+      throw new AnchorError('post_anchor_failed', postAnchor, anchorResult);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -115,11 +189,20 @@ export async function clickPoint(profileId, point, options = {}) {
 export async function pressKey(profileId, key, options) {
   const opts = options || {};
   const timeoutMs = Math.max(500, Number(opts.timeoutMs || 8000));
+  const postAnchor = opts.postAnchor;
   await withTimeout(
     callAPI('keyboard:press', { profileId, key: String(key || '').trim() }),
     timeoutMs,
     'KEY_PRESS_TIMEOUT',
   );
+
+  // Post-anchor verification
+  if (postAnchor) {
+    const anchorResult = await verifyPostAnchor(profileId, postAnchor);
+    if (!anchorResult.ok) {
+      throw new AnchorError('post_anchor_failed', postAnchor, anchorResult);
+    }
+  }
 }
 
 /**
@@ -161,6 +244,7 @@ export async function clearAndType(profileId, text, keyDelayMs, options) {
   const allowProceedOnSelectFailure = opts.allowProceedOnSelectFailure === true;
   const primarySelectKey = process.platform === 'darwin' ? 'Meta+A' : 'Control+A';
   const fallbackSelectKey = process.platform === 'darwin' ? 'Control+A' : 'Meta+A';
+  const postAnchor = opts.postAnchor;
 
   let selectOk = false;
   try {
@@ -201,23 +285,39 @@ export async function clearAndType(profileId, text, keyDelayMs, options) {
     typeTimeoutMs,
     'CLEAR_AND_TYPE_TYPE_TIMEOUT',
   );
+
+  // Post-anchor verification
+  if (postAnchor) {
+    const anchorResult = await verifyPostAnchor(profileId, postAnchor);
+    if (!anchorResult.ok) {
+      throw new AnchorError('post_anchor_failed', postAnchor, anchorResult);
+    }
+  }
 }
 
-// ---------------------------------------------------------------------------
-// Scroll / wheel
-// ---------------------------------------------------------------------------
+
 
 /**
  * Simulate mouse wheel (PageDown/PageUp keys).
  * @param {string} profileId
  * @param {number} deltaY - Positive = down, negative = up
  */
-export async function wheel(profileId, deltaY) {
+export async function wheel(profileId, deltaY, options) {
+  const opts = options || {};
+  const postAnchor = opts.postAnchor;
   const raw = Number(deltaY) || 0;
   const key = raw >= 0 ? 'PageDown' : 'PageUp';
   const steps = Math.max(1, Math.min(8, Math.round(Math.abs(raw) / 420) || 1));
   for (let step = 0; step < steps; step += 1) {
     await pressKey(profileId, key);
     await sleep(80);
+  }
+
+  // Post-anchor verification
+  if (postAnchor) {
+    const anchorResult = await verifyPostAnchor(profileId, postAnchor);
+    if (!anchorResult.ok) {
+      throw new AnchorError('post_anchor_failed', postAnchor, anchorResult);
+    }
   }
 }

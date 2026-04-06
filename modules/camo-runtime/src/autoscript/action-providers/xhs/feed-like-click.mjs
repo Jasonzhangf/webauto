@@ -56,7 +56,8 @@ export async function executeFeedLikeClick({ profileId, candidate, pushTrace }) 
   }
 
   try {
-    await clickPoint(profileId, candidate.center, { clicks: 1 });
+    await clickPoint(profileId, candidate.center, { clicks: 1,
+      postAnchor: { type: 'visible', selector: '[class*="like-wrapper"][class*="active"], .like-wrapper.active', minCount: 1, timeoutMs: 3000 } });
   } catch {
     pushTrace({
       kind: 'skip',
@@ -155,7 +156,8 @@ export async function executeFeedUnlikeClick({ profileId, candidate, pushTrace }
   }
 
   try {
-    await clickPoint(profileId, candidate.center, { clicks: 1 });
+    await clickPoint(profileId, candidate.center, { clicks: 1,
+      postAnchor: { type: 'visible', selector: '[class*="like-wrapper"][class*="active"], .like-wrapper.active', minCount: 1, timeoutMs: 3000 } });
   } catch {
     pushTrace({
       kind: 'skip',

@@ -1032,13 +1032,15 @@ export async function executeOpenDetailOperation({ profileId, params = {}, conte
     if (!candidate.inViewport) {
       await ensureSearchCandidateFullyVisible(profileId, noteId);
     }
-    await clickPoint(profileId, candidate.center, { steps: 3 });
+    await clickPoint(profileId, candidate.center, { steps: 3,
+        postAnchor: { type: 'url_contains', urlPattern: '/explore/', timeoutMs: 5000 } });
     pushTrace({ kind: 'click', stage: 'open_detail', noteId, selector: candidate.selector, attempt: 1 });
     const opened = await waitForDetailVisible(profileId, 3200, 200);
     if (!opened?.detailVisible) {
       const retryCandidate = await readSearchCandidateByNoteId(profileId, noteId);
       if (retryCandidate?.found && retryCandidate.center) {
-        await clickPoint(profileId, retryCandidate.center, { steps: 3 });
+        await clickPoint(profileId, retryCandidate.center, { steps: 3,
+        postAnchor: { type: 'url_contains', urlPattern: '/explore/', timeoutMs: 5000 } });
         pushTrace({ kind: 'click', stage: 'open_detail_retry', noteId, selector: retryCandidate.selector, attempt: 2 });
         await waitForDetailVisible(profileId, 3200, 200);
       }

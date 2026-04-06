@@ -276,7 +276,8 @@ export async function readDetailCloseTarget(profileId) {
 }
 
 export async function closeDetailToSearch(profileId, pushTrace = null) {
-  await pressKey(profileId, 'Escape');
+  await pressKey(profileId, 'Escape', {
+    postAnchor: { type: 'not_exist', selector: '[class*="detail-mask"], .note-detail-mask', timeoutMs: 3000 } });
   if (typeof pushTrace === 'function') {
     pushTrace({ kind: 'key', stage: 'close_detail', key: 'Escape' });
   }
@@ -292,7 +293,8 @@ export async function closeDetailToSearch(profileId, pushTrace = null) {
   const closeTarget = await readDetailCloseTarget(profileId);
   if (!closeTarget?.found) return { ok: false, reason: 'no_close_button' };
   const { clickPoint } = await import('./dom-ops.mjs');
-  await clickPoint(profileId, closeTarget.center);
+  await clickPoint(profileId, closeTarget.center, {
+    postAnchor: { type: 'not_exist', selector: '[class*="detail-mask"], .note-detail-mask', timeoutMs: 3000 } });
   if (typeof pushTrace === 'function') {
     pushTrace({ kind: 'click', stage: 'close_detail', selector: closeTarget.selector || null });
   }

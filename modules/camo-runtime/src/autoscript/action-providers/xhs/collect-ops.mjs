@@ -641,7 +641,8 @@ export async function executeSubmitSearchOperation({ profileId, params = {}, con
           throw new Error(`SEARCH_BUTTON_NOT_FOUND:${String(button?.reason || 'unknown')}`);
         }
         try {
-          await clickPoint(profileId, button.center, { timeoutMs: 8000 });
+          await clickPoint(profileId, button.center, { timeoutMs: 8000,
+            postAnchor: { type: 'exist', selector: '#search-result, .search-result-container, .note-item', timeoutMs: 5000 } });
           pushTrace({ kind: 'click', stage: 'submit_search', target: 'search_button', attempt });
         } catch (error) {
           pushTrace({ kind: 'click_error', stage: 'submit_search', target: 'search_button', attempt, error: String(error?.message || error) });
