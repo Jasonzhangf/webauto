@@ -1310,30 +1310,24 @@ export async function executeCommentsHarvestOperation({ profileId, params = {}, 
   const runExpandRepliesPass = async ({ phase = 'initial', round = 0 } = {}) => {
     progress('expand_replies_pass_start', { phase, round, timeoutMs: expandPassTimeoutMs });
     let timeoutFired = false;
-    const timeoutResult = sleepImpl(expandPassTimeoutMs).then(() => {
-      timeoutFired = true;
-      return {
-        ok: false,
-        code: 'EXPAND_REPLIES_TIMEOUT',
-        message: `expand replies exceeded ${expandPassTimeoutMs}ms`,
-        data: { phase, round, timeoutMs: expandPassTimeoutMs },
-      };
-    });
-    const passResult = await Promise.race([
-      executeExpandRepliesOperation({
-        profileId,
-        context: {
-          ...context,
-          event: { count: 12, elements: [] },
-        },
-      }).catch((error) => ({
-        ok: false,
-        code: 'EXPAND_REPLIES_FAILED',
-        message: error?.message || 'expand replies failed',
-        data: null,
-      })),
-      timeoutResult,
-    ]);
+    const passResult = await executeExpandRepliesOperation({
+      profileId,
+      context: {
+        ...context,
+        event: { count: 12, elements: [] },
+      },
+    }).then((result) => {
+      // Treat NO_TARGETS as success (no expand buttons = nothing to do)
+      if (result?.code === 'EXPAND_REPLIES_NO_TARGETS') {
+        return { ...result, ok: true };
+      }
+      return result;
+    }).catch((error) => ({
+      ok: false,
+      code: 'EXPAND_REPLIES_FAILED',
+      message: error?.message || 'expand replies failed',
+      data: null,
+    }));
     if (state.lastExpandReplies && typeof state.lastExpandReplies === 'object') {
       mergeExpandRepliesAggregate(expandRepliesAggregate, state.lastExpandReplies);
     }
