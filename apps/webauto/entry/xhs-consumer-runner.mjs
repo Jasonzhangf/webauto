@@ -40,7 +40,7 @@ export async function runConsumerTask(args = {}) {
   console.log(`[consumer] mode=always-on (persistent, idle interval=${CONSUMER_IDLE_INTERVAL_MS}ms)`);
 
   // Dynamic import unified runner — Consumer reuses the existing XHS unified pipeline
-  const { runXhsUnified } = await import('./xhs-unified.mjs');
+  const { runUnified } = await import('./xhs-unified.mjs');
 
   let totalProcessed = 0;
   let idleRounds = 0;
@@ -62,7 +62,7 @@ export async function runConsumerTask(args = {}) {
     // Run unified pipeline (one batch)
     // The unified pipeline handles claim/process/complete internally
     try {
-      const batchResult = await runXhsUnified({
+      const batchResult = await runUnified({
         profile: profileId,
         keyword,
         env,
