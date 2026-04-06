@@ -1,5 +1,5 @@
 /**
- * XHS Producer Runner - Always-On 模式的链接采集端
+ * XHS Producer Runner - Always-On 模式：热搜榜扫描 + 帖子入队
  */
 
 import path from 'node:path';
@@ -89,42 +89,79 @@ function loadExistingNoteIds(outputDir) {
   return noteIds;
 }
 
+/**
+ * 从小红书热搜榜提取热搜关键词
+ */
+async function fetchHotSearchKeywords({ profileId, maxKeywords = 10 }) {
+  console.log(`[producer] fetching hot search keywords...`);
+
+  // 导航到小红书首页
+  await callAPI('goto', {
+    profileId,
+    url: 'https://www.xiaohongshu.com',
+  });
+  await sleep(3000);
+
+  // 点击搜索框激活热搜列表
+  const activateScript = `(function(){
+    const input = document.querySelector('#search-input, input.search-input');
+    if (!input) return {error: 'no search input'};
+    input.focus();
+    input.click();
+    return {ok: true};
+  })()`;
+
+  await callAPI('evaluate', { profileId, script: activateScript });
+  await sleep(3000);
+
+  // 提取热搜关键词
+  const extractKeywordsScript = `(function(){
+    const items = document.querySelectorAll('.suggest-item, .search-suggest-item, [class*="suggest"], [class*="hot-search"]');
+    const keywords = [];
+    for (const item of items) {
+      const text = item.textContent?.trim();
+      if (text && text.length > 1 && text.length < 30) {
+        keywords.push(text);
+      }
+    }
+    // Fallback
+    if (keywords.length === 0) {
+      const fallback = document.querySelectorAll('span[class*="text"], .title, [class*="hot"]');
+      for (const el of fallback) {
+        const t = el.textContent?.trim();
+        if (t && t.length > 1 && t.length < 30 && !t.includes('http')) {
+          keywords.push(t);
+        }
+      }
+    }
+    return {keywords: [...new Set(keywords)].slice(0, ${maxKeywords})};
+  })()`;
+
+  const result = await callAPI('evaluate', { profileId, script: extractKeywordsScript });
+  console.log(`[producer] hot search result: ${JSON.stringify(result)}`);
+
+  if (result?.keywords && Array.isArray(result.keywords)) {
+    return result.keywords;
+  }
+
+  return [];
+}
+
+/**
+ * 搜索并提取帖子链接
+ */
 async function searchAndCollectLinks({ profileId, keyword, maxLinks }) {
   const allLinks = [];
   console.log(`[producer] searching for: ${keyword}`);
   
-  // Step 1: 确保浏览器在首页
-  console.log(`[producer] navigating to home...`);
-  const gotoResult = await callAPI('goto', {
+  // 直接导航到搜索结果页
+  await callAPI('goto', {
     profileId,
-    url: 'https://www.xiaohongshu.com',
+    url: `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(keyword)}&source=web_search_result_notes`,
   });
-  console.log(`[producer] goto result: ${JSON.stringify(gotoResult)}`);
   await sleep(5000);
 
-  // Step 2: 搜索
-  const searchScript = `(function(){
-    const input = document.querySelector('#search-input, input.search-input');
-    if (!input) return {error: 'no search input'};
-    input.value = '${keyword.replace(/'/g, "\\'")}';
-    input.dispatchEvent(new Event('input',{bubbles:true}));
-    input.dispatchEvent(new Event('change',{bubbles:true}));
-    input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',keyCode:13,bubbles:true}));
-    return {ok: true};
-  })()`;
-
-  console.log(`[producer] executing search...`);
-  const searchResult = await callAPI('evaluate', { profileId, script: searchScript });
-  console.log(`[producer] search result: ${JSON.stringify(searchResult)}`);
-  
-  if (searchResult?.error) {
-    console.error(`[producer] search failed: ${searchResult.error}`);
-    return [];
-  }
-
-  await sleep(8000);
-
-  // Step 3: 提取链接
+  // 提取搜索结果
   const extractScript = `(function(){
     const items = document.querySelectorAll('.note-item a[href*="/explore/"], .search-result-item a[href*="/explore/"]');
     const links = [];
@@ -178,19 +215,24 @@ async function enqueueLinks({ links, keyword, env }) {
   return { added };
 }
 
-export async function runProducerTask(args = {}) {
-  const profileId = String(args.profile || 'xhs-qa-1').trim();
-  const keyword = String(args.keyword || args.k || '').trim();
+/**
+ * 主入口
+ */
+export async function runProducerTask(args) {
   const env = String(args.env || 'debug').trim();
   const maxLinksPerScan = Math.max(1, Number(args['max-links-per-scan'] || PRODUCER_MAX_LINKS_PER_SCAN));
   const minQueueDepth = Number(args['min-queue-depth'] || PRODUCER_MIN_QUEUE_DEPTH);
-
-  if (!keyword) return { ok: false, error: 'keyword required' };
-
-  console.log(`[producer] keyword=${keyword} profile=${profileId} env=${env}`);
+  const profileId = String(args.profile || 'xhs-qa-1').trim();
+  
+  console.log(`[producer] profile=${profileId} env=${env}`);
   console.log(`[producer] mode=always-on scan=${PRODUCER_SCAN_INTERVAL_MS}ms`);
+  console.log(`[producer] hot-search=enabled (fetch from xiaohongshu.com)`);
 
-  let totalScanned = 0, totalAdded = 0, consecutiveErrors = 0, lastHealthCheck = Date.now();
+  let totalScanned = 0;
+  let totalAdded = 0;
+  let totalKeywords = 0;
+  let consecutiveErrors = 0;
+  let lastHealthCheck = Date.now();
 
   // Wait for browser
   for (let i = 0; i < 10; i++) {
@@ -204,7 +246,7 @@ export async function runProducerTask(args = {}) {
 
   while (true) {
     if (process.env.WEBAUTO_JOB_STOPPING === 'true') {
-      return { ok: true, scanned: totalScanned, added: totalAdded };
+      return { ok: true, scanned: totalScanned, added: totalAdded, keywords: totalKeywords };
     }
 
     if (Date.now() - lastHealthCheck > HEALTH_CHECK_INTERVAL_MS) {
@@ -219,30 +261,44 @@ export async function runProducerTask(args = {}) {
     }
 
     try {
-      const outputDir = path.join(process.env.HOME || '', '.webauto', 'download', 'xiaohongshu', env, keyword);
-      const existingNoteIds = loadExistingNoteIds(outputDir);
-      console.log(`[producer] existing: ${existingNoteIds.size}`);
+      // Step 1: 从热搜榜获取关键词
+      const hotKeywords = await fetchHotSearchKeywords({ profileId, maxKeywords: 10 });
+      console.log(`[producer] hot keywords: ${JSON.stringify(hotKeywords)}`);
+      totalKeywords += hotKeywords.length;
 
-      const newLinks = await searchAndCollectLinks({ profileId, keyword, maxLinks: maxLinksPerScan * 2 });
-      console.log(`[producer] found: ${newLinks.length}`);
+      if (hotKeywords.length === 0) {
+        console.log('[producer] no hot keywords found, waiting...');
+        await sleep(PRODUCER_SCAN_INTERVAL_MS);
+        continue;
+      }
 
-      const deduped = newLinks.filter(l => !existingNoteIds.has(l.noteId));
-      console.log(`[producer] new: ${deduped.length}`);
+      // Step 2: 对每个热搜关键词进行搜索采集
+      for (const keyword of hotKeywords) {
+        const outputDir = path.join(process.env.HOME || '', '.webauto', 'download', 'xiaohongshu', env, keyword);
+        const existingNoteIds = loadExistingNoteIds(outputDir);
+        console.log(`[producer] keyword="${keyword}" existing: ${existingNoteIds.size}`);
 
-      const result = await enqueueLinks({ links: deduped, keyword, env });
-      totalAdded += result.added;
-      console.log(`[producer] added: ${result.added} total: ${totalAdded}`);
+        const newLinks = await searchAndCollectLinks({ profileId, keyword, maxLinks: maxLinksPerScan });
+        console.log(`[producer] keyword="${keyword}" found: ${newLinks.length}`);
+
+        const deduped = newLinks.filter(l => !existingNoteIds.has(l.noteId));
+        console.log(`[producer] keyword="${keyword}" new: ${deduped.length}`);
+
+        const result = await enqueueLinks({ links: deduped, keyword, env });
+        totalAdded += result.added;
+        console.log(`[producer] keyword="${keyword}" added: ${result.added}`);
+      }
 
       totalScanned++;
       consecutiveErrors = 0;
 
-      if (result.added > 0 && result.added < minQueueDepth) {
-        console.log('[producer] low water, rescan...');
+      if (totalAdded > 0 && totalAdded < minQueueDepth) {
+        console.log('[producer] low water, rescanning...');
         await sleep(5000);
         continue;
       }
 
-      console.log(`[producer] waiting ${PRODUCER_SCAN_INTERVAL_MS}ms...`);
+      console.log(`[producer] scan complete, waiting ${PRODUCER_SCAN_INTERVAL_MS}ms...`);
       await sleep(PRODUCER_SCAN_INTERVAL_MS);
 
     } catch (err) {
@@ -258,6 +314,7 @@ export async function runProducerTask(args = {}) {
   }
 }
 
+// Main entry
 if (import.meta.url === `file://${process.argv[1]}`) {
   const args = process.argv.slice(2);
   const parsed = {};
