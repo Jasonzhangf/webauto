@@ -1,7 +1,4 @@
 import { devtoolsEval } from './common.mjs';
-import { callAPI } from "../../shared/api-client.mjs";
-import { sleep } from "../../shared/dom-ops.mjs";
-
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -9,6 +6,19 @@ const BROWSER_SERVICE_URL = process.env.CAMO_BROWSER_HTTP_PROTO
   ? `${process.env.CAMO_BROWSER_HTTP_PROTO}://${process.env.CAMO_BROWSER_HTTP_HOST || '127.0.0.1'}:${process.env.CAMO_BROWSER_HTTP_PORT || 7704}`
   : 'http://127.0.0.1:7704';
 
+async function callAPI(action, payload = {}, timeoutMs = 20000) {
+  const r = await fetch(`${BROWSER_SERVICE_URL}/command`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, args: payload }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  return r.json();
+}
+
+const CHECK_TITLE_JS = String.raw`(() => document.title)()`;
+
+const SCROLL_BOTTOM_JS = String.raw`(() => {
   window.scrollTo(0, document.body.scrollHeight);
   return 'scrolled';
 })()`;
