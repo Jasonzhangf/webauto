@@ -1607,7 +1607,9 @@ const applyVisibleLikePass = async (currentSnapshot) => {
           return kw.some((kwItem) => text.toLowerCase().includes(kwItem.toLowerCase()));
         }).length
       : 0;
-    const actualMatches = inlineLikeStats.hitCount + inlineLikeStats.skippedCount;
+    // actualMatches should equal hitCount (matched = liked + skipped)
+    // hitCount = likedCount + skippedCount (all matched comments, either liked or skipped)
+    const actualMatches = inlineLikeStats.hitCount;
     const mismatch = keywordHitsCount - actualMatches;
     
     progress('visible_like_pass_done', {
