@@ -122,3 +122,24 @@ export async function runConsumerTask(args = {}) {
     }
   }
 }
+
+// Main entry
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const args = process.argv.slice(2);
+  const parsed = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith('--')) {
+      const key = args[i].slice(2);
+      const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : 'true';
+      parsed[key] = value;
+      if (value !== 'true') i++;
+    }
+  }
+  runConsumerTask(parsed).then(result => {
+    console.log('[consumer] exit:', result);
+    process.exit(result.ok ? 0 : 1);
+  }).catch(err => {
+    console.error('[consumer] fatal:', err);
+    process.exit(1);
+  });
+}
