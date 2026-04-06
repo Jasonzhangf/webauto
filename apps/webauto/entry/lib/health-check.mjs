@@ -188,6 +188,12 @@ export async function performHealthCheck(options = {}) {
   // 5. 僵尸进程检测
   checks.zombieWorkers = checkZombieWorkers();
 
+  // 6. daemon spawn 能力
+  checks.daemonSpawn = checkDaemonSpawnHealth();
+
+  // 7. 最近 spawn 失败率
+  checks.recentSpawnFailures = checkRecentSpawnFailures();
+
   // 综合判断
   const allOk = Object.values(checks).every((c) => c.ok === true);
   const criticalFailures = Object.entries(checks)
@@ -256,4 +262,102 @@ export default {
   checkInputResponsiveness,
   checkBrowserProcess,
   checkZombieWorkers,
+  checkDaemonSpawnHealth,
+  checkRecentSpawnFailures,
 };
+
+/**
+ * 检查 daemon spawn 能力
+ * 通过 spawn 一个 --help 任务来验证 spawn 是否正常
+ */
+function checkDaemonSpawnHealth() {
+  try {
+    const result = spawnSync(process.execPath, ['bin/webauto.mjs', 'xhs', '--help'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true,
+    });
+    
+    const code = result.status;
+    const stderr = String(result.stderr || '').trim();
+    
+    if (code !== 0) {
+      return { 
+        ok: false, 
+        error: `spawn_failed_code_${code}`, 
+        stderr: stderr.slice(0, 500),
+        message: 'daemon spawn 子进程失败，可能 launchd 重启后进程状态异常'
+      };
+    }
+    
+    return { ok: true };
+  } catch (error) {
+    return { 
+      ok: false, 
+      error: String(error?.message || error),
+      message: 'daemon spawn 异常'
+    };
+  }
+}
+
+/**
+ * 检查最近 spawn 失败率
+ * 分析最近 N 个 job 是否有高频 exit null
+ */
+function checkRecentSpawnFailures(jobLogDir = null) {
+  const fs = require('fs');
+  const path = require('path');
+  
+  const logDir = jobLogDir || path.join(process.env.HOME, '.webauto', 'logs', 'daemon-jobs');
+  
+  if (!fs.existsSync(logDir)) {
+    return { ok: true, skipped: true, reason: 'log_dir_not_found' };
+  }
+  
+  try {
+    const files = fs.readdirSync(logDir)
+      .filter(f => f.endsWith('.log'))
+      .map(f => ({
+        name: f,
+        path: path.join(logDir, f),
+        mtime: fs.statSync(path.join(logDir, f)).mtime
+      }))
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(0, 10);  // 最近 10 个任务
+    
+    if (files.length === 0) {
+      return { ok: true, skipped: true, reason: 'no_jobs' };
+    }
+    
+    let exitNullCount = 0;
+    for (const file of files) {
+      const content = fs.readFileSync(file.path, 'utf8');
+      if (content.includes('Error: exit null')) {
+        exitNullCount++;
+      }
+    }
+    
+    const failureRate = exitNullCount / files.length;
+    
+    if (failureRate >= 0.5) {
+      return {
+        ok: false,
+        error: 'high_spawn_failure_rate',
+        exitNullCount,
+        totalJobs: files.length,
+        failureRate: `${(failureRate * 100).toFixed(0)}%`,
+        message: `最近 ${files.length} 个任务中 ${exitNullCount} 个 exit null，spawn 能力异常`
+      };
+    }
+    
+    return {
+      ok: true,
+      exitNullCount,
+      totalJobs: files.length,
+      failureRate: `${(failureRate * 100).toFixed(0)}%`
+    };
+  } catch (error) {
+    return { ok: false, error: String(error?.message || error) };
+  }
+}
