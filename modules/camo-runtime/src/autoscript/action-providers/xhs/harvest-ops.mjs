@@ -400,11 +400,8 @@ async function processVisibleCommentLikes({ profileId, state, params, current, s
   if (maxLikes <= 0) {
     return { hitCount: 0, likedCount: 0, skippedCount: 0, alreadyLikedSkipped: 0, dedupSkipped: 0 };
   }
-  // Use visible comment targets to avoid DOM index mismatch due to virtual scrolling
-  const visible = await readVisibleCommentTargets(profileId).catch(() => null);
-  const comments = Array.isArray(visible?.comments)
-    ? visible.comments
-    : (Array.isArray(current?.comments) ? current.comments : []);
+  // Use current snapshot comments directly to avoid DOM inconsistency between probe and match
+  const comments = Array.isArray(current?.comments) ? current.comments : [];
   const binding = resolveRuntimeNoteBinding(state, params);
   const boundNoteId = String(binding.noteId || state.currentNoteId || '').trim() || null;
   const boundHref = String(binding.href || state.currentHref || '').trim() || null;
@@ -1562,7 +1559,10 @@ const applyVisibleLikePass = async (currentSnapshot) => {
       keywords: kw,
       keywordHits: Array.isArray(currentSnapshot?.comments)
         ? currentSnapshot.comments
-            .filter((c) => kw.some((kwItem) => String(c?.content || '').includes(kwItem)))
+            .filter((c) => {
+            const text = normalizeInlineText(`${c?.author || c?.userName || ''} ${c?.content || ''}`);
+            return kw.some((kwItem) => text.toLowerCase().includes(kwItem.toLowerCase()));
+          })
             .slice(0, 12)
             .map((c) => ({
               index: c?.index ?? null,
@@ -1600,11 +1600,35 @@ const applyVisibleLikePass = async (currentSnapshot) => {
       inlineLikeSummaryPath = persisted.summaryPath || inlineLikeSummaryPath;
       inlineLikeStatePath = persisted.likeStatePath || inlineLikeStatePath;
     }
+    // Verify matching closed loop: keywordHits count should match hitCount + skippedCount
+    const keywordHitsCount = Array.isArray(currentSnapshot?.comments)
+      ? currentSnapshot.comments.filter((c) => {
+          const text = normalizeInlineText(`${c?.author || c?.userName || ''} ${c?.content || ''}`);
+          return kw.some((kwItem) => text.toLowerCase().includes(kwItem.toLowerCase()));
+        }).length
+      : 0;
+    const actualMatches = inlineLikeStats.hitCount + inlineLikeStats.skippedCount;
+    const mismatch = keywordHitsCount - actualMatches;
+    
     progress('visible_like_pass_done', {
       hitCount: inlineLikeStats.hitCount,
       likedCount: inlineLikeStats.likedCount,
       skippedCount: inlineLikeStats.skippedCount,
+      keywordHitsCount,
+      actualMatches,
+      mismatch,
     });
+    
+    // Log mismatch for debugging (rollback mechanism to be implemented)
+    if (mismatch > 0) {
+      progress('visible_like_mismatch', {
+        expected: keywordHitsCount,
+        actual: actualMatches,
+        mismatch,
+        reason: 'DOM changed between probe and match, or likeTarget not found',
+      });
+    }
+    
     return inlineLikeStats;
   };
 
