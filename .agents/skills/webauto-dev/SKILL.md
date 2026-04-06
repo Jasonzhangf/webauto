@@ -506,3 +506,134 @@ E2E 压力测试验证 camo@0.3.4 修复效果
 2. **持久化**：clock.md 记录完整巡检历史，便于事后审计
 3. **自愈**：即使终端断开，clock 仍会触发提醒
 4. **可追溯**：每次巡检 append-only，不覆盖历史
+
+## XV. Post-Anchor Verification 改造计划（强制）
+
+### 核心原则
+
+**每�� DOM 写操作执行后，必须验证锚点确认页面状态符合预期。点击是写操作。**
+
+### Block 层改造（shared/dom-ops.mjs）
+
+只改 5 个写操作函数，**编排层零改动**：
+
+| # | 函数 | 行号 | 调用次数 | 改造内容 |
+|---|------|------|----------|----------|
+| 1 | `clickPoint` | 80 | 13 | 新增可选 `options.postAnchor` |
+| 2 | `pressKey` | 115 | 9 | 新增可选 `options.postAnchor` |
+| 3 | `typeText` | 133 | 0 | 新增可选 `options.postAnchor` |
+| 4 | `clearAndType` | 153 | 1 | 新增可选 `options.postAnchor` |
+| 5 | `wheel` | 215 | 0 | 新增可选 `options.postAnchor` |
+
+### 改造方式
+
+```javascript
+// 每个写操作新增可选参数 postAnchor
+async function clickPoint(profileId, point, options = {}) {
+  // ... 原有逻辑 ...
+
+  // [NEW] 操作后锚点验证
+  if (options.postAnchor) {
+    const anchorOk = await verifyPostAnchor(profileId, options.postAnchor);
+    if (!anchorOk) {
+      throw new AnchorError('post_anchor_failed', options.postAnchor);
+    }
+  }
+  return result;
+}
+```
+
+**向后兼容**：无 `postAnchor` 参数时保持原行为。
+
+### 调用方改造示例
+
+```javascript
+// 改造前
+await clickPoint(profileId, target.center);
+
+// 改造后（搜索点击）
+await clickPoint(profileId, target.center, {
+  postAnchor: { type: 'visible', selector: '.note-item', minCount: 1 }
+});
+
+// 改造后（关闭详情）
+await clickPoint(profileId, closeTarget.center, {
+  postAnchor: { type: 'not_exist', selector: '.note-detail-mask' }
+});
+```
+
+### 改造顺序与验证
+
+| 优先级 | 函数 | 改造点 | 手动验证场景 | 自动验证 |
+|--------|------|--------|-------------|----------|
+| P1 | `clickPoint` | 13 个调用点 | 搜索→结果页、打开详情→详情页、关闭→搜索页、点赞→红心 | 单帖 E2E |
+| P2 | `pressKey` | 9 个调用点 | PageDown→新内容、Enter→搜索、Escape→弹窗关闭 | 单帖 E2E |
+| P3 | `clearAndType` | 1 个调用点 | 评论回复→评论出现 | 手动验证 |
+| P4 | `scrollBySelector` | 0 个调用点 | 滚动容器→新内容 | 手动验证 |
+| P5 | `wheel` | 0 个调用点 | 滚动→视口变化 | 手动验证 |
+
+### 验证流程（每一步必须通过）
+
+1. **代码改造** → import 验证
+2. **手动 camo 验证** → 用 `camo attach` 发单条指令，确认锚点验证生效
+3. **单帖 E2E** → `webauto daemon task submit -- xhs unified --keyword xxx --max-notes 1`
+4. **10 帖 E2E** → 确认链路不阻塞
+5. **50 帖压力测试** → 最终验证
+
+### 验证标准
+
+| 场景 | 预期 |
+|------|------|
+| 浏览器在无关页面 → 执行搜索 | 锚点验证失败 → 导航回首页 → 重试 |
+| 搜索后无结果 | 锚点验证失败 → 不��入采集 → 重试搜索 |
+| 点击展开后内容未展开 | 锚点验证失败 → 不采集截断内容 → 标记异常 |
+| 关闭详情后实际未关闭 | 锚点验证失败 → 不打开下一条 → 恢复 |
+| 日志格式 | 每个写操作必须包含 `postAnchorStatus` |
+
+### 错误案例（禁止再发生）
+
+❌ 浏览器在详情页 → 任务执行搜索 → 0 条链接 → 空跑 1 小时
+- **原因**：`submit_search` 执行后没有验证锚点
+- **修复**：`clickPoint` 加 `postAnchor: { type: 'visible', selector: '.note-item', minCount: 1 }`
+
+### 设计文档
+
+`docs/arch/post-anchor-verification-design.md`
+
+---
+
+## XIV. Camo Decoupling 审查规则
+
+### 强制规则
+1. **camo = framework, no business logic** — camo 代码中不应出现 `xiaohongshu`/`weibo`/`xhs` 等业务关键词
+2. **平台特定配置通过参数/环境变量传入** — 不硬编码在框架层
+3. **新增平台只需改 webauto** — 不需要修改 camo 框架
+
+### 环境变量配置
+
+| 变量 | 用途 | 默认值 |
+|------|------|--------|
+| `CAMO_COOKIE_DOMAINS` | Cookie 保存域名 | `weibo.com,xiaohongshu.com` |
+| `CAMO_WINDOWS_DSF_PROFILES` | Windows DSF Profile 前缀 | `xiaohongshu_,weibo_` |
+| `CAMO_INPUT_MODE` | 输入模式 | `playwright` (非 CDP) |
+
+### checkpoint selectors 参数化
+
+```javascript
+// camo framework
+await detectCheckpoint({
+  profileId,
+  platform,
+  checkpoints: { search_ready: [...], ... },  // ← 调用方传入
+  platformHost: 'xiaohongshu.com',            // ← 调用方传入
+});
+
+// webauto business layer
+import { XHS_CHECKPOINTS, XHS_PLATFORM_HOST } from './config/xhs-checkpoints.mjs';
+await detectCheckpoint({
+  profileId,
+  platform: 'xiaohongshu',
+  checkpoints: XHS_CHECKPOINTS,
+  platformHost: XHS_PLATFORM_HOST,
+});
+```
