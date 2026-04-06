@@ -1,7 +1,18 @@
-import { callAPI } from '../../shared/api-client.mjs';
-import { sleep } from '../../shared/dom-ops.mjs';
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+const BROWSER_SERVICE_URL = process.env.CAMO_BROWSER_HTTP_PROTO
+  ? `${process.env.CAMO_BROWSER_HTTP_PROTO}://${process.env.CAMO_BROWSER_HTTP_HOST || '127.0.0.1'}:${process.env.CAMO_BROWSER_HTTP_PORT || 7704}`
+  : 'http://127.0.0.1:7704';
 
+async function callAPI(action, payload = {}, timeoutMs = 20000) {
+  const r = await fetch(`${BROWSER_SERVICE_URL}/command`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, args: payload }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  return r.json();
+}
 
 const WEIBO_HOST_RE = /(^|\.)(weibo\.com|weibo\.cn|t\.cn)$/i;
 const XHS_HOST_RE = /(^|\.)(xiaohongshu\.com|xhslink\.com|xhs\.cn)$/i;
@@ -18,6 +29,7 @@ export function detectPlatform(url) {
   if (XHS_HOST_RE.test(hostname)) return { platform: 'xhs', host: hostname, fullUrl: normalized };
   if (/bilibili\.com|b23\.tv/i.test(hostname)) return { platform: 'bilibili', host: hostname, fullUrl: normalized };
   return { platform: 'unknown', host: hostname, fullUrl: normalized };
+}
 
 /**
  * Navigate browser to URL, wait for redirects to settle, then read the actual page URL.
@@ -27,6 +39,7 @@ async function navigateAndDetect(profileId, url) {
   const gotoResp = await callAPI('goto', { profileId, url }, 20000);
   if (!gotoResp?.ok) {
     return { ok: false, error: 'GOTO_FAILED', detail: JSON.stringify(gotoResp) };
+  }
   await sleep(5000);
 
   // Read actual URL from browser
@@ -35,6 +48,7 @@ async function navigateAndDetect(profileId, url) {
   const platform = detectPlatform(finalUrl).platform;
 
   return { ok: true, finalUrl, platform };
+}
 
 /**
  * Extract video from current browser page.
@@ -52,6 +66,7 @@ async function extractVideoFromCurrentPage(profileId) {
       pageUrl: resp?.result?.pageUrl || '',
       author: resp?.result?.author || null,
     };
+  }
 
   const bestUrl = resp.result.videoUrls.find(u => u.includes('.mp4')) || resp.result.videoUrls[0];
 
@@ -63,6 +78,7 @@ async function extractVideoFromCurrentPage(profileId) {
     author: resp.result.author || null,
     title: resp.result.title || null,
   };
+}
 
 /**
  * Main entry: navigate → detect platform → extract video.
@@ -72,11 +88,13 @@ export async function extractVideoUrl(profileId, url) {
   const inputUrl = String(url || '').trim();
   if (!inputUrl) {
     return { ok: false, error: 'URL_REQUIRED', message: 'url is required' };
+  }
 
   // Step 1: Navigate browser to URL (handles redirects automatically)
   const nav = await navigateAndDetect(profileId, inputUrl);
   if (!nav.ok) {
     return { ok: false, error: nav.error, message: 'Navigation failed', detail: nav.detail };
+  }
 
   // Step 2: Check actual landing URL platform
   if (nav.platform !== 'weibo' && nav.platform !== 'xhs') {
@@ -87,9 +105,11 @@ export async function extractVideoUrl(profileId, url) {
       resolvedUrl: nav.finalUrl,
       detectedPlatform: nav.platform,
     };
+  }
 
   // Step 3: Extract video from page
   const result = await extractVideoFromCurrentPage(profileId);
   result.platform = nav.platform;
   result.resolvedUrl = nav.finalUrl;
   return result;
+}
