@@ -637,3 +637,65 @@ await detectCheckpoint({
   platformHost: XHS_PLATFORM_HOST,
 });
 ```
+---
+
+## XV. 评论点赞匹配一致性问题排查（2026-04-06 修复）
+
+### 问题现象
+
+- **visible_comments_probe** 显示 keywordHits > 0（探测到匹配评论）
+- **match_probe** 显示 matchedCount = 0（实际匹配为 0）
+- **visible_like_pass_done** 显示 hitCount = 0, likedCount = 0（无点赞）
+
+### 根因分析
+
+| 阶段 | 数据来源 | 匹配逻辑 | 问题 |
+|------|----------|----------|------|
+| **probe 阶段** | currentSnapshot.comments | content.includes(keyword) | 只匹配 content |
+| **match 阶段** | readVisibleCommentTargets().comments | (author + content).includes(keyword) | 匹配 author+content |
+| **DOM 一致性** | 两次独立调用 | 虚拟滚动导致 DOM 变化 | 评论列表不同 |
+
+### 修复方案
+
+1. **processVisibleCommentLikes**：使用 current.comments 代替 readVisibleCommentTargets()
+   - 避免 probe 和 match 阶段读取不同的 DOM 快照
+   - 修复文件：harvest-ops.mjs:404
+
+2. **keywordHits 匹配逻辑**：改为 author + content 匹配
+   - 与 processVisibleCommentLikes 的匹配逻辑对齐
+   - 修复文件：harvest-ops.mjs:1562
+
+3. **闭环验证**：visible_like_pass_done 新增字段
+   - keywordHitsCount: 预期匹配数
+   - actualMatches: 实际匹配数 (hitCount + skippedCount)
+   - mismatch: 差值（应为 0）
+
+### 排查步骤
+
+1. **检查日志事件**
+   ```bash
+   grep 'visible_comments_probe' job_*.log | jq -c '{visibleCount, keywordHitsCount}'
+   grep 'visible_like_pass_done' job_*.log | jq -c '{hitCount, likedCount, skippedCount, keywordHitsCount, actualMatches, mismatch}'
+   ```
+
+2. **验证闭环**
+   - 正常：keywordHitsCount === actualMatches, mismatch = 0
+   - 异常：mismatch > 0 → 触发 visible_like_mismatch 事件
+
+3. **检查 DOM 变化**
+   - expand_replies_pass 后 DOM 会变化
+   - 虚拟滚动导致评论列表变化
+   - 解决方案：用同一快照 (current.comments) 避免不一致
+
+### 验证标准
+
+- ✅ mismatch = 0（所有探测到的匹配都处理了）
+- ✅ likedCount + skippedCount = hitCount（点赞闭环）
+- ✅ visible_like_mismatch 事件不出现
+
+### 回滚机制（待实现）
+
+如果 mismatch > 0：
+1. 滚动回顶部
+2. 重新滚动查找未点赞的评论
+3. 再次点赞直到 remaining = 0
