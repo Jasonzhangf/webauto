@@ -97,9 +97,10 @@ function normalizeSeedUrl(rawSeedUrl) {
   if (!parsed) return String(rawSeedUrl || '').trim();
   const host = String(parsed.hostname || '').toLowerCase();
   const pathname = String(parsed.pathname || '');
-  const isXhsHost = host.includes('xiaohongshu.com');
-  const isXhsDetailPath = /^\/explore\/[^/]+$/.test(pathname);
-  if (isXhsHost && isXhsDetailPath) {
+  const KNOWN_HOSTS = ['xiaohongshu.com', 'weibo.com', 'weibo.cn'];
+  const isKnownHost = KNOWN_HOSTS.some(h => host.includes(h));
+  const isDetailPath = /^\/(explore|detail|tv|u)\/[^/]+$/.test(pathname);
+  if (isKnownHost && isDetailPath) {
     parsed.pathname = '/explore';
     parsed.search = '';
     parsed.hash = '';

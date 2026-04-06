@@ -1,5 +1,6 @@
 import { getDomSnapshotByProfile } from '../../utils/browser-service.mjs';
 import { detectCheckpoint } from './checkpoint.mjs';
+import { XHS_CHECKPOINTS, XHS_PLATFORM_HOST } from './config/xhs-checkpoints.mjs';
 import {
   asErrorPayload,
   buildSelectorCheck,
@@ -29,7 +30,12 @@ async function validatePage(profileId, spec = {}, platform = 'xiaohongshu') {
   const checkpoints = normalizeArray(spec.checkpointIn || []);
   let checkpoint = null;
   if (checkpoints.length > 0) {
-    const detected = await detectCheckpoint({ profileId, platform });
+    const detected = await detectCheckpoint({
+    profileId,
+    platform,
+    checkpoints: platform === 'xiaohongshu' ? XHS_CHECKPOINTS : undefined,
+    platformHost: platform === 'xiaohongshu' ? XHS_PLATFORM_HOST : undefined,
+  });
     checkpoint = detected?.data?.checkpoint || null;
     if (!checkpoints.includes(checkpoint)) {
       errors.push(`checkpoint mismatch: got ${checkpoint}, expect one of ${checkpoints.join(',')}`);
