@@ -10,23 +10,28 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
-import { pathToFileURL } from 'node:url';
-import {
-  initXhsDetailLinkQueue,
-  claimXhsDetailLink,
-  completeXhsDetailLink,
-} from '../../../modules/camo-runtime/src/autoscript/action-providers/xhs/search-gate-ops.mjs';
-import { readJsonlRows } from '../../../modules/camo-runtime/src/autoscript/action-providers/xhs/persistence.mjs';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// callAPI 封装（与 browser-service HTTP 通信）
+const BROWSER_SERVICE_URL = process.env.BROWSER_SERVICE_URL || 'http://127.0.0.1:7704';
+
+async function callAPI(action, params = {}) {
+  const url = `${BROWSER_SERVICE_URL}/${action}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  return res.json();
 }
 
 // 运行配置
 const PRODUCER_SCAN_INTERVAL_MS = 30 * 60_000;  // 每 30 分钟扫描一次
 const PRODUCER_MIN_QUEUE_DEPTH = 10;            // 低水位阈值
 const PRODUCER_MAX_LINKS_PER_SCAN = 20;         // 单次扫描上限
-const PRODUCER_MAX_SCANS = 1;                   // 单次连续扫描次数
 
 // 自动恢复配置（Always-On 核心能力）
 const PRODUCER_MAX_CONSECUTIVE_ERRORS = 3;
@@ -88,8 +93,9 @@ function loadExistingNoteIds(outputDir) {
   const postsPath = path.join(outputDir, 'posts.jsonl');
   if (fs.existsSync(postsPath)) {
     try {
-      const rows = readJsonlRows(postsPath);
-      for (const row of rows) {
+      const content = fs.readFileSync(postsPath, 'utf-8');
+      for (const line of content.trim().split('\n').filter(Boolean)) {
+        const row = JSON.parse(line);
         const noteId = String(row.noteId || row.id || '').trim();
         if (noteId) noteIds.add(noteId);
       }
@@ -99,85 +105,140 @@ function loadExistingNoteIds(outputDir) {
 }
 
 /**
- * 搜索并提取帖子链接（通过 camo CLI）
+ * 搜索并提取帖子链接（通过 callAPI evaluate）
  */
 async function searchAndCollectLinks({ profileId, keyword, maxLinks }) {
-  const { execSync } = await import('node:child_process');
-  const maxPages = Math.max(1, Math.ceil(maxLinks / 20));
   const allLinks = [];
 
-  // 使用 camo CLI 执行搜索
-  const script = `
-    const searchInput = document.querySelector('#search-input, input.search-input');
-    if (!searchInput) return { error: 'search_input_not_found' };
-    searchInput.value = '';
-    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-    searchInput.value = '${keyword.replace(/'/g, "\\'")}';
-    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-    searchInput.dispatchEvent(new Event('change', { bubbles: true }));
-    const enterEvent = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true });
-    searchInput.dispatchEvent(enterEvent);
-    return { ok: true, keyword: '${keyword.replace(/'/g, "\\'")}' };
+  // Step 1: 导航到搜索页并输入关键词
+  console.log(`[producer] searching for: ${keyword}`);
+  
+  const searchScript = `
+    (async () => {
+      // 导航到首页
+      if (!window.location.href.includes('xiaohongshu.com/explore')) {
+        window.location.href = 'https://www.xiaohongshu.com';
+        await new Promise(r => setTimeout(r, 3000));
+      }
+      
+      // 查找搜索框并输入
+      const searchInput = document.querySelector('#search-input, input.search-input');
+      if (!searchInput) return { error: 'search_input_not_found' };
+      
+      searchInput.focus();
+      searchInput.value = '';
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      
+      await new Promise(r => setTimeout(r, 500));
+      
+      searchInput.value = '${keyword.replace(/'/g, "\\'")}';
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      searchInput.dispatchEvent(new Event('change', { bubbles: true }));
+      
+      const enterEvent = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true });
+      searchInput.dispatchEvent(enterEvent);
+      
+      await new Promise(r => setTimeout(r, 5000));
+      
+      return { ok: true, keyword: '${keyword.replace(/'/g, "\\'")}' };
+    })()
   `;
 
-  const cmd = `camo eval --profile ${profileId} --js '${script.replace(/'/g, "'\\''")}'`;
-  try {
-    execSync(cmd, { timeout: 30000, encoding: 'utf-8' });
-  } catch { /* may fail, continue */ }
+  const searchResult = await callAPI('evaluate', {
+    profileId,
+    script: searchScript,
+  });
+
+  if (searchResult?.error) {
+    console.error(`[producer] search failed: ${searchResult.error}`);
+    return [];
+  }
 
   await sleep(5000);
 
-  // 提取搜索结果
+  // Step 2: 提取搜索结果
   const extractScript = `
-    const items = document.querySelectorAll('.note-item a[href*="/explore/"]');
-    const links = [];
-    for (const item of items) {
-      const href = item.getAttribute('href');
-      if (href && !href.includes('source=')) {
-        const noteId = href.split('/').pop();
-        links.push({ noteId, url: 'https://www.xiaohongshu.com' + href });
+    (() => {
+      const items = document.querySelectorAll('.note-item a[href*="/explore/"], .search-result-item a[href*="/explore/"]');
+      const links = [];
+      for (const item of items) {
+        const href = item.getAttribute('href');
+        if (href && !href.includes('source=')) {
+          const noteId = href.split('/').pop();
+          const title = item.querySelector('.title')?.textContent?.trim() || '';
+          links.push({ noteId, url: 'https://www.xiaohongshu.com' + href, title });
+        }
       }
-    }
-    return { links, count: links.length };
+      return { links, count: links.length };
+    })()
   `;
 
-  const extractCmd = `camo eval --profile ${profileId} --js '${extractScript.replace(/'/g, "'\\''")}'`;
-  try {
-    const output = execSync(extractCmd, { timeout: 30000, encoding: 'utf-8' });
-    const result = JSON.parse(output.trim());
-    if (result?.links) {
-      allLinks.push(...result.links.slice(0, maxLinks));
-    }
-  } catch { /* ignore */ }
+  const extractResult = await callAPI('evaluate', {
+    profileId,
+    script: extractScript,
+  });
 
+  if (extractResult?.links) {
+    allLinks.push(...extractResult.links.slice(0, maxLinks));
+  }
+
+  console.log(`[producer] extracted ${allLinks.length} links`);
   return allLinks;
+}
+
+/**
+ * 初始化队列并获取已 claim 的链接
+ */
+async function getClaimedLinks(keyword, env) {
+  const linksPath = path.join(
+    process.env.HOME || '',
+    '.webauto',
+    'download',
+    'xiaohongshu',
+    env,
+    keyword,
+    'links.jsonl'
+  );
+
+  const claimed = new Set();
+  if (fs.existsSync(linksPath)) {
+    try {
+      const content = fs.readFileSync(linksPath, 'utf-8');
+      for (const line of content.trim().split('\n').filter(Boolean)) {
+        const row = JSON.parse(line);
+        if (row.noteId) claimed.add(row.noteId);
+      }
+    } catch { /* ignore */ }
+  }
+  return claimed;
 }
 
 /**
  * 入队新链接
  */
-async function enqueueLinks({ links, keyword, env, maxLinksPerScan }) {
-  const outputCtx = {
-    keywordDir: path.join(process.env.HOME || '', '.webauto', 'download', 'xiaohongshu', env, keyword),
-  };
-  
-  // 初始化队列
-  await initXhsDetailLinkQueue({ keyword, env, profile: 'xhs-qa-1' });
+async function enqueueLinks({ links, keyword, env }) {
+  const outputDir = path.join(
+    process.env.HOME || '',
+    '.webauto',
+    'download',
+    'xiaohongshu',
+    env,
+    keyword
+  );
+
+  // 确保目录存在
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const linksPath = path.join(outputDir, 'links.jsonl');
+  const claimed = await getClaimedLinks(keyword, env);
 
   let added = 0;
-  for (const link of links.slice(0, maxLinksPerScan)) {
-    try {
-      const claim = await claimXhsDetailLink({ keyword, env });
-      if (claim.ok && claim.link) {
-        // 已存在，跳过
-        continue;
-      }
-      // 新链接，入队逻辑（简化：直接写入 links.jsonl）
-      const linksPath = path.join(outputCtx.keywordDir, 'links.jsonl');
-      const line = JSON.stringify({ ...link, collectedAt: new Date().toISOString() }) + '\n';
-      fs.appendFileSync(linksPath, line);
-      added++;
-    } catch { /* ignore */ }
+  for (const link of links) {
+    if (claimed.has(link.noteId)) continue;
+
+    const line = JSON.stringify({ ...link, collectedAt: new Date().toISOString() }) + '\n';
+    fs.appendFileSync(linksPath, line);
+    added++;
   }
 
   return { added };
@@ -207,6 +268,20 @@ export async function runProducerTask(args = {}) {
   let consecutiveErrors = 0;
   let lastHealthCheck = Date.now();
 
+  // 等待 browser-service 就绪
+  console.log(`[producer] waiting for browser-service...`);
+  for (let i = 0; i < 10; i++) {
+    try {
+      const res = await fetch(HEALTH_CHECK_URL);
+      const health = await res.json();
+      if (health.ok) {
+        console.log(`[producer] browser-service ready`);
+        break;
+      }
+    } catch {}
+    await sleep(2000);
+  }
+
   while (true) {
     // Stop signal
     if (process.env.WEBAUTO_JOB_STOPPING === 'true') {
@@ -234,7 +309,7 @@ export async function runProducerTask(args = {}) {
       const existingNoteIds = loadExistingNoteIds(outputDir);
       console.log(`[producer] existing noteIds: ${existingNoteIds.size}`);
 
-      // Step 2: 搜索
+      // Step 2: 搜索并提取链接
       const newLinks = await searchAndCollectLinks({ profileId, keyword, maxLinks: maxLinksPerScan * 2 });
       console.log(`[producer] search results: ${newLinks.length}`);
 
@@ -243,7 +318,7 @@ export async function runProducerTask(args = {}) {
       console.log(`[producer] new links (after dedup): ${deduped.length}`);
 
       // Step 4: 入队
-      const result = await enqueueLinks({ links: deduped, keyword, env, maxLinksPerScan });
+      const result = await enqueueLinks({ links: deduped, keyword, env });
       totalAdded += result.added;
       console.log(`[producer] enqueued: ${result.added} (total: ${totalAdded})`);
 
