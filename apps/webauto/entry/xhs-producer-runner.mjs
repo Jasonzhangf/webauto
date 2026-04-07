@@ -19,12 +19,21 @@ async function callAPI(action, params = {}) {
     body: JSON.stringify(params),
   });
   const text = await res.text();
+  if (!text || text.length === 0) {
+    return { ok: true }; // 某些操作如 goto 可能返回空
+  }
   try {
     return JSON.parse(text);
   } catch (e) {
     console.error(`[callAPI] parse error for ${action}: ${text.slice(0, 200)}`);
     throw new Error(`JSON parse error: ${e.message}`);
   }
+}
+
+async function gotoUrl({ profileId, url }) {
+  // 使用 evaluate 设置 window.location 实现导航
+  const script = `(function(){ window.location.href = '${url}'; return {ok: true, url: '${url}'}; })()`;
+  return callAPI('evaluate', { profileId, script });
 }
 
 const PRODUCER_SCAN_INTERVAL_MS = 30 * 60_000;
@@ -96,11 +105,8 @@ async function fetchHotSearchKeywords({ profileId, maxKeywords = 10 }) {
   console.log(`[producer] fetching hot search keywords...`);
 
   // 导航到小红书首页
-  await callAPI('goto', {
-    profileId,
-    url: 'https://www.xiaohongshu.com',
-  });
-  await sleep(3000);
+  await gotoUrl({ profileId, url: 'https://www.xiaohongshu.com' });
+  await sleep(5000);
 
   // 点击搜索框激活热搜列表
   const activateScript = `(function(){
@@ -155,11 +161,9 @@ async function searchAndCollectLinks({ profileId, keyword, maxLinks }) {
   console.log(`[producer] searching for: ${keyword}`);
   
   // 直接导航到搜索结果页
-  await callAPI('goto', {
-    profileId,
-    url: `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(keyword)}&source=web_search_result_notes`,
-  });
-  await sleep(5000);
+  const searchUrl = `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(keyword)}&source=web_search_result_notes`;
+  await gotoUrl({ profileId, url: searchUrl });
+  await sleep(6000);
 
   // 提取搜索结果
   const extractScript = `(function(){
