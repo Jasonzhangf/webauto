@@ -28,6 +28,10 @@ import {
   releaseDetailLink,
   clearDetailLinkQueue,
   summarizeDetailQueues,
+  recordSeen,
+  checkSeen,
+  summarizeSeenRecords,
+  loadSeenRecords,
 } from '../runtime/infra/utils/search-gate-core.mjs';
 
 const HOST = String(process.env.WEBAUTO_SEARCH_GATE_HOST || '127.0.0.1').trim();
@@ -103,6 +107,8 @@ if (String(process.env.WEBAUTO_SEARCH_GATE_DISABLE_HEARTBEAT || '').trim() !== '
 }
 
 const gateState = createSearchGateState();
+// Load persistent seen records on startup
+loadSeenRecords(gateState);
 
 function parseBody(req) {
   return new Promise((resolve) => {
@@ -141,6 +147,7 @@ const server = http.createServer(async (req, res) => {
         keywordHistory: Array.from(gateState.keywordHistory.entries()),
         resourceHistory: Array.from(gateState.resourceHistory.entries()),
         detailQueues: summarizeDetailQueues(gateState),
+        seenRecords: summarizeSeenRecords(gateState),
       });
     }
     if (req.method === 'POST' && url.pathname === '/shutdown') {
@@ -199,6 +206,21 @@ const server = http.createServer(async (req, res) => {
       const body = await parseBody(req);
       const response = clearDetailLinkQueue(gateState, body || {});
       console.log('[SearchGate] detail-links clear', JSON.stringify({ key: response.key, cleared: response.cleared }));
+      return json(res, 200, response);
+    }
+
+    // Producer Dedup APIs (Server-Side Seen Records)
+    if (req.method === 'POST' && url.pathname === '/detail-links/record-seen') {
+      const body = await parseBody(req);
+      const response = recordSeen(gateState, body || {});
+      console.log('[SearchGate] detail-links record-seen', JSON.stringify({ noteId: response.noteId, alreadySeen: response.alreadySeen }));
+      return json(res, 200, response);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/detail-links/check-seen') {
+      const body = await parseBody(req);
+      const response = checkSeen(gateState, body || {});
+      console.log('[SearchGate] detail-links check-seen', JSON.stringify({ seenCount: response.seenCount, unseenCount: response.unseenCount }));
       return json(res, 200, response);
     }
 

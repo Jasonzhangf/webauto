@@ -1,3 +1,7 @@
+import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
+
 export function createSearchGateState() {
   return {
     buckets: new Map(),
@@ -6,6 +10,7 @@ export function createSearchGateState() {
     keywordHistory: new Map(),
     resourceHistory: new Map(),
     detailQueues: new Map(),
+    seenRecords: new Map(), // Global seen records for dedup (跨队列持久化)
   };
 }
 
@@ -662,4 +667,140 @@ export function confirmSearchGateUsage(state, body = {}, config = {}, now = Date
     reason: 'confirmed',
     sameResourceMaxConsecutive,
   });
+}
+
+/**
+ * Server-Side Seen Records (Producer Dedup)
+ *
+ * 跨队列去重集合：Producer 入队前检查，Consumer 完成后登记。
+ * 持久化到 ~/.webauto/state/search-gate/seen-records.jsonl
+ */
+
+
+const SEEN_RECORDS_DIR = path.join(
+  process.env.WEBAUTO_HOME || path.join(os.homedir(), '.webauto'),
+  'state', 'search-gate'
+);
+const SEEN_RECORDS_FILE = path.join(SEEN_RECORDS_DIR, 'seen-records.jsonl');
+
+/**
+ * 记录一个 noteId 为已处理（Producer 入队前 / Consumer 完成后调用）
+ * @returns {{ ok: boolean, alreadySeen: boolean, noteId: string }}
+ */
+export function recordSeen(state, body = {}) {
+  if (!(state.seenRecords instanceof Map)) {
+    state.seenRecords = new Map();
+  }
+
+  const noteId = String(body?.noteId || '').trim();
+  if (!noteId) {
+    return { ok: false, error: 'noteId is required', alreadySeen: false, noteId: '' };
+  }
+
+  const source = String(body?.source || 'unknown').trim();
+  const queueKey = String(body?.key || body?.queueKey || 'default').trim();
+  const now = new Date().toISOString();
+
+  const alreadySeen = state.seenRecords.has(noteId);
+
+  if (!alreadySeen) {
+    const record = { noteId, source, queueKey, firstSeenAt: now, updatedAt: now };
+    state.seenRecords.set(noteId, record);
+    persistSeenRecord(record);
+  } else {
+    // Update existing record
+    const existing = state.seenRecords.get(noteId);
+    existing.updatedAt = now;
+    existing.source = source;
+  }
+
+  return { ok: true, alreadySeen, noteId };
+}
+
+/**
+ * 批量检查多个 noteId 是否已处理
+ * @returns {{ ok: boolean, results: Array<{ noteId: string, seen: boolean }> }}
+ */
+export function checkSeen(state, body = {}) {
+  if (!(state.seenRecords instanceof Map)) {
+    state.seenRecords = new Map();
+  }
+
+  const noteIds = Array.isArray(body?.noteIds) ? body.noteIds : [];
+  if (noteIds.length === 0) {
+    return { ok: true, results: [], seenCount: 0, unseenCount: 0 };
+  }
+
+  const results = noteIds.map(noteId => ({
+    noteId: String(noteId).trim(),
+    seen: state.seenRecords.has(String(noteId).trim()),
+  }));
+
+  const seenCount = results.filter(r => r.seen).length;
+  const unseenCount = results.length - seenCount;
+
+  return { ok: true, results, seenCount, unseenCount };
+}
+
+/**
+ * 获取 seen records 统计信息
+ */
+export function summarizeSeenRecords(state) {
+  if (!(state.seenRecords instanceof Map)) {
+    return { totalSeen: 0, sources: {} };
+  }
+
+  const totalSeen = state.seenRecords.size;
+  const sources = {};
+  for (const [, record] of state.seenRecords) {
+    const src = record.source || 'unknown';
+    sources[src] = (sources[src] || 0) + 1;
+  }
+
+  return { totalSeen, sources };
+}
+
+/**
+ * 从持久化文件恢复 seen records
+ */
+export function loadSeenRecords(state) {
+  if (!(state.seenRecords instanceof Map)) {
+    state.seenRecords = new Map();
+  }
+
+  if (!fs.existsSync(SEEN_RECORDS_FILE)) {
+    return { ok: true, loaded: 0 };
+  }
+
+  try {
+    const lines = fs.readFileSync(SEEN_RECORDS_FILE, 'utf-8').trim().split('\n');
+    let loaded = 0;
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const record = JSON.parse(line);
+        if (record.noteId) {
+          state.seenRecords.set(record.noteId, record);
+          loaded++;
+        }
+      } catch {}
+    }
+    console.log(`[seen-records] loaded ${loaded} records from ${SEEN_RECORDS_FILE}`);
+    return { ok: true, loaded };
+  } catch (err) {
+    console.error(`[seen-records] failed to load: ${err.message}`);
+    return { ok: false, error: err.message, loaded: 0 };
+  }
+}
+
+/**
+ * 追加单条 seen record 到持久化文件
+ */
+function persistSeenRecord(record) {
+  try {
+    fs.mkdirSync(SEEN_RECORDS_DIR, { recursive: true });
+    fs.appendFileSync(SEEN_RECORDS_FILE, JSON.stringify(record) + '\n');
+  } catch (err) {
+    console.error(`[seen-records] failed to persist: ${err.message}`);
+  }
 }

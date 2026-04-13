@@ -8,7 +8,16 @@
  * 4. 完成后标记（complete）
  * 5. 队列为空时等待，不退出
  * 6. 健康检查 + 自动恢复（core feature）
+ * 7. 状态持久化（崩溃恢复） — NEW
  */
+
+import {
+  loadConsumerState,
+  saveConsumerState,
+  updateProcessedCount,
+  recordError,
+  resetConsumerState,
+} from './lib/consumer-state.mjs';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -90,6 +99,7 @@ export async function runConsumerTask(args = {}) {
   const maxNotes = Math.max(1, Number(args['max-notes'] || 0)); // 0 = unlimited
   const tabCount = Math.max(1, Number(args['tab-count'] || 4));
   const commentBudget = Math.max(0, Number(args['comment-budget'] || 50));
+  const forceReset = args['force-reset'] === 'true' || args['force-reset'] === true;
 
   if (!keyword) {
     return { ok: false, error: 'keyword is required' };
@@ -101,12 +111,27 @@ export async function runConsumerTask(args = {}) {
   console.log(`[consumer] mode=always-on (persistent, idle interval=${CONSUMER_IDLE_INTERVAL_MS}ms)`);
   console.log(`[consumer] auto-recovery=enabled (max consecutive errors=${CONSUMER_MAX_CONSECUTIVE_ERRORS})`);
 
+  // === 状态持久化集成 ===
+  // 1. 加载或初始化状态
+  let state;
+  if (forceReset) {
+    console.log(`[consumer] force-reset=true, resetting state...`);
+    state = resetConsumerState(keyword, env);
+  } else {
+    state = loadConsumerState(keyword, env);
+    if (state.processed > 0) {
+      console.log(`[consumer] 📂 recovered state: processed=${state.processed} lastNoteId=${state.lastProcessedNoteId}`);
+      console.log(`[consumer] started at ${state.startedAt}, last update ${state.updatedAt}`);
+    }
+  }
+
   // Dynamic import unified runner
   const { runUnified } = await import('./xhs-unified.mjs');
 
-  let totalProcessed = 0;
+  // 2. 从恢复状态初始化运行变量
+  let totalProcessed = state.processed;
   let idleRounds = 0;
-  let consecutiveErrors = 0;
+  let consecutiveErrors = state.consecutiveErrors;
   let lastHeartbeat = Date.now();
   let lastHealthCheck = Date.now();
 
@@ -114,12 +139,26 @@ export async function runConsumerTask(args = {}) {
     // Check stop signal (from daemon)
     if (process.env.WEBAUTO_JOB_STOPPING === 'true') {
       console.log(`[consumer] stop signal received, exiting. processed=${totalProcessed}`);
+      // 保存最终状态
+      saveConsumerState(keyword, env, {
+        processed: totalProcessed,
+        consecutiveErrors,
+        lastError: state.lastError,
+        startedAt: state.startedAt,
+      });
       return { ok: true, processed: totalProcessed, reason: 'stop_signal' };
     }
 
-    // Heartbeat
+    // Heartbeat（持久化心跳）
     if (Date.now() - lastHeartbeat > CONSUMER_HEARTBEAT_MS) {
       console.log(`[consumer] ❤️ heartbeat: processed=${totalProcessed} idleRounds=${idleRounds} consecutiveErrors=${consecutiveErrors}`);
+      // 每次心跳持久化状态
+      state = saveConsumerState(keyword, env, {
+        processed: totalProcessed,
+        consecutiveErrors,
+        lastError: state.lastError,
+        startedAt: state.startedAt,
+      });
       lastHeartbeat = Date.now();
     }
 
@@ -129,6 +168,8 @@ export async function runConsumerTask(args = {}) {
       if (!health.ok) {
         consecutiveErrors++;
         console.error(`[consumer] ⚠️ health check failed (${consecutiveErrors}/${CONSUMER_MAX_CONSECUTIVE_ERRORS})`);
+        // 记录错误到状态文件
+        recordError(keyword, env, 'health_check_failed');
         if (consecutiveErrors >= CONSUMER_MAX_CONSECUTIVE_ERRORS) {
           return { ok: false, processed: totalProcessed, reason: 'health_check_exhausted' };
         }
@@ -157,7 +198,12 @@ export async function runConsumerTask(args = {}) {
         totalProcessed += processed;
         idleRounds = 0;
         consecutiveErrors = 0; // Reset on success
-        console.log(`[consumer] ✅ batch done: processed=${processed} total=${totalProcessed}`);
+        
+        // === 每次成功处理后持久化进度 ===
+        const lastNoteId = batchResult.lastProcessedNoteId || null;
+        state = updateProcessedCount(keyword, env, processed, lastNoteId);
+        
+        console.log(`[consumer] ✅ batch done: processed=${processed} total=${totalProcessed} (persisted)`);
       } else {
         const reason = batchResult?.terminalCode || batchResult?.error || 'unknown';
         console.log(`[consumer] batch ended: reason=${reason}`);
@@ -181,6 +227,9 @@ export async function runConsumerTask(args = {}) {
         if (isSessionError(reason)) {
           consecutiveErrors++;
           console.error(`[consumer] ⚠️ session error (${consecutiveErrors}/${CONSUMER_MAX_CONSECUTIVE_ERRORS}): ${reason}`);
+          
+          // 记录错误到状态文件
+          recordError(keyword, env, reason);
 
           if (consecutiveErrors >= CONSUMER_MAX_CONSECUTIVE_ERRORS) {
             const recover = await healthCheckAndRecover(profileId);
@@ -192,6 +241,13 @@ export async function runConsumerTask(args = {}) {
         } else {
           // Other terminal reasons (error, user cancel, etc.)
           console.log(`[consumer] terminal reason: ${reason}, exiting. processed=${totalProcessed}`);
+          // 保存最终状态
+          saveConsumerState(keyword, env, {
+            processed: totalProcessed,
+            consecutiveErrors,
+            lastError: reason,
+            startedAt: state.startedAt,
+          });
           return { ok: false, processed: totalProcessed, reason };
         }
       }
@@ -205,6 +261,9 @@ export async function runConsumerTask(args = {}) {
       console.error(`[consumer] ❌ batch error: ${err.message}`);
       consecutiveErrors++;
       
+      // 记录错误到状态文件
+      recordError(keyword, env, err.message);
+
       if (isSessionError(err.message)) {
         console.error(`[consumer] session error (${consecutiveErrors}/${CONSUMER_MAX_CONSECUTIVE_ERRORS})`);
         if (consecutiveErrors >= CONSUMER_MAX_CONSECUTIVE_ERRORS) {

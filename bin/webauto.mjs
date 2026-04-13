@@ -850,15 +850,21 @@ async function main() {
     return;
   }
 
-  // Handle xhs-consumer from schedule daemon
-  if (cmd === "xhs-consumer") {
-    const script = path.join(ROOT, "apps", "webauto", "entry", "xhs-consumer-runner.mjs");
-    await run(process.execPath, [script, ...rawArgv.slice(1)]);
+// Handle xhs-consumer from schedule daemon
+if (cmd === "xhs-consumer") {
+  const script = path.join(ROOT, "apps", "webauto", "entry", "xhs-consumer-runner.mjs");
+  await run(process.execPath, [script, ...rawArgv.slice(1)]);
+  return;
+}
+
+  // Handle weibo-special-follow-monitor from schedule daemon
+  if (cmd === "weibo-special-follow-monitor") {
+    const script = path.join(ROOT, "apps", "webauto", "entry", "weibo-special-follow.mjs");
+    await run(process.execPath, [script, "start", ...rawArgv.slice(1)]);
     return;
   }
 
-
-  if (cmd === 'version') {
+if (cmd === 'version') {
     const jsonMode = args.json === true;
     const action = String(args._[1] || '').trim();
     if (!action) {

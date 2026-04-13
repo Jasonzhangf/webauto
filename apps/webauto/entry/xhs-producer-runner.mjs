@@ -11,6 +11,7 @@ function sleep(ms) {
 
 const BROWSER_SERVICE_URL = process.env.BROWSER_SERVICE_URL || 'http://127.0.0.1:7704';
 const HEALTH_CHECK_URL = BROWSER_SERVICE_URL + '/health';
+const SEARCH_GATE_URL = process.env.WEBAUTO_SEARCH_GATE_URL || 'http://127.0.0.1:7790';
 
 // 使用 /command API 调用 browser-service
 async function callAPI(action, params = {}) {
@@ -146,6 +147,21 @@ async function enqueueLinks({ links, keyword, env }) {
   fs.mkdirSync(outputDir, { recursive: true });
   const linksPath = path.join(outputDir, 'links.jsonl');
 
+  // Server-side dedup via SearchGate
+  const checkResult = await fetch(`${SEARCH_GATE_URL}/detail-links/check-seen`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ noteIds: links.map(l => l.noteId), key: keyword }),
+  }).then(r => r.json()).catch(() => ({ ok: false, results: [] }));
+
+  // Filter out already-seen links
+  const unseenLinks = checkResult.ok
+    ? links.filter(l => {
+        const r = checkResult.results?.find(r => r.noteId === l.noteId);
+        return !r?.seen;
+      })
+    : links; // Fallback to all links if check fails
+
   const existing = new Set();
   if (fs.existsSync(linksPath)) {
     const lines = fs.readFileSync(linksPath, 'utf-8').trim().split('\n');
@@ -158,9 +174,16 @@ async function enqueueLinks({ links, keyword, env }) {
   }
 
   let added = 0;
-  for (const link of links) {
+  for (const link of unseenLinks) {
     if (existing.has(link.noteId)) continue;
     fs.appendFileSync(linksPath, JSON.stringify({ ...link, collectedAt: new Date().toISOString() }) + '\n');
+    // Register to server-side seen set
+    await fetch(`${SEARCH_GATE_URL}/detail-links/record-seen`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ noteId: link.noteId, source: 'producer', key: keyword }),
+    }).catch(() => {});
+    
     added++;
   }
 

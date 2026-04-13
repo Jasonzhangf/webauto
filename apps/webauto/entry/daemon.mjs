@@ -39,6 +39,7 @@ import {
   listScheduleTasks,
 } from './lib/schedule-store.mjs';
 import { evaluateRetry } from './lib/schedule-retry.mjs';
+import { normalizePlatformByCommandType, pickAutoProfile, loadPlatformConfig } from './lib/platform-config.mjs';
 import { listAccountProfiles } from './lib/account-store.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1003,46 +1004,32 @@ async function startDaemonServer() {
 
   // ── Schedule integration ──────────────────────────────────────────────
 
-  let scheduleOwnerId = null;
-  let scheduleLeaseAcquired = false;
-  let scheduleRunning = false;
-  let scheduleTickTimer = null;
+ let scheduleOwnerId = null;
+ let scheduleLeaseAcquired = false;
+ let scheduleRunning = false;
+ let scheduleTickTimer = null;
+  let scheduleConsecutiveErrors = 0;
+  let scheduleLastErrorTime = 0;
+  const SCHEDULE_MAX_CONSECUTIVE_ERRORS = 3;
+  const SCHEDULE_ERROR_BACKOFF_BASE_MS = 30_000; // 30s base, doubles each error
 
   function createScheduleOwnerId() {
     return `daemon-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
   }
 
-  function normalizePlatformByCommandType(commandType) {
-    const value = String(commandType || '').trim().toLowerCase();
-    if (value.startsWith('weibo')) return 'weibo';
-    if (value.startsWith('1688')) return '1688';
-    return 'xiaohongshu';
-  }
 
-  function pickAutoProfile(platform) {
-    const rows = listAccountProfiles({ platform }).profiles || [];
-    const validRows = rows
-      .filter((row) => row?.valid === true && String(row?.accountId || '').trim())
-      .sort((a, b) => {
-        const ta = Date.parse(String(a?.updatedAt || '')) || 0;
-        const tb = Date.parse(String(b?.updatedAt || '')) || 0;
-        if (tb !== ta) return tb - ta;
-        return String(a?.profileId || '').localeCompare(String(b?.profileId || ''));
-      });
-    return String(validRows[0]?.profileId || '').trim();
-  }
 
-  function ensureProfileArg(commandType, commandArgv) {
-    const argv = commandArgv && typeof commandArgv === 'object' ? { ...commandArgv } : {};
-    if (String(argv?.profile || '').trim()) return argv;
-    if (String(argv?.profiles || '').trim()) return argv;
-    if (String(argv?.profilepool || '').trim()) return argv;
-    const platform = normalizePlatformByCommandType(commandType);
-    const profile = pickAutoProfile(platform);
-    if (!profile) return argv;
-    argv.profile = profile;
-    return argv;
-  }
+ function ensureProfileArg(commandType, commandArgv) {
+   const argv = commandArgv && typeof commandArgv === 'object' ? { ...commandArgv } : {};
+   if (String(argv?.profile || '').trim()) return argv;
+   if (String(argv?.profiles || '').trim()) return argv;
+   if (String(argv?.profilepool || '').trim()) return argv;
+   const platform = normalizePlatformByCommandType(commandType);
+    const profile = pickAutoProfile(platform, listAccountProfiles);
+   if (!profile) return argv;
+   argv.profile = profile;
+   return argv;
+ }
 
   async function scheduleExecuteTask(task) {
     const runToken = createScheduleOwnerId();
@@ -1060,9 +1047,20 @@ async function startDaemonServer() {
       }
       return { ok: false, skipped: true, taskId: task?.id, reason: claim.reason };
     }
-    const heartbeatMs = Math.max(5_000, Math.floor(SCHEDULE_LEASE_MS / 3));
+   const heartbeatMs = Math.max(5_000, Math.floor(SCHEDULE_LEASE_MS / 3));
+    let leaseLost = false;
     const heartbeat = setInterval(() => {
-      renewScheduleTaskClaim(task.id, { ownerId: scheduleOwnerId, runToken, leaseMs: SCHEDULE_LEASE_MS });
+      const renewResult = renewScheduleTaskClaim(task.id, { ownerId: scheduleOwnerId, runToken, leaseMs: SCHEDULE_LEASE_MS });
+      if (!renewResult?.ok) {
+        leaseLost = true;
+        logDaemonEvent('schedule_lease_lost', {
+          taskId: task.id,
+          reason: renewResult?.reason || 'unknown',
+          runToken,
+          message: 'Lease renew failed, task may be preempted. Aborting.',
+        });
+        clearInterval(heartbeat);
+      }
     }, heartbeatMs);
     heartbeat.unref();
     const startedAt = Date.now();
@@ -1081,8 +1079,22 @@ async function startDaemonServer() {
         cliArgs.push(flag, String(val));
       }
 
-      const ret = await startTaskJob({ args: cliArgs, wait: true });
+     const ret = await startTaskJob({ args: cliArgs, wait: true });
       const durationMs = Date.now() - startedAt;
+      if (leaseLost) {
+        logDaemonEvent('schedule_task_aborted', {
+          taskId: task.id,
+          durationMs,
+          message: 'Task aborted due to lease loss',
+        });
+        markScheduleTaskResult(task.id, {
+          status: 'failed',
+          error: 'lease_lost',
+          durationMs,
+          finishedAt: new Date().toISOString(),
+        });
+        return { ok: false, taskId: task.id, error: 'lease_lost', durationMs };
+      }
 
       const status = ret?.ok ? 'success' : 'failed';
       markScheduleTaskResult(task.id, {
@@ -1126,18 +1138,47 @@ async function startDaemonServer() {
           renewScheduleDaemonLease({ ownerId: scheduleOwnerId, leaseMs: SCHEDULE_LEASE_MS });
         }, hbMs).unref();
       }
-      const dueTasks = listDueScheduleTasks(10);
-      for (const task of dueTasks) {
-        if (state.shuttingDown) break;
-        // Wait for no running jobs (daemon exclusive task policy)
-        const activeJobs = state.jobsOrder.map((id) => state.jobs.get(id)).filter((j) => j && j.status === 'running');
-        if (activeJobs.length > 0) break;
-        await scheduleExecuteTask(task);
+     const dueTasks = listDueScheduleTasks(10);
+      // Fire all due tasks in parallel; claimScheduleTask handles concurrency limits
+      const results = await Promise.allSettled(
+        dueTasks.map(task => scheduleExecuteTask(task))
+      );
+     for (const result of results) {
+       if (result.status === 'rejected') {
+         logDaemonEvent('schedule_task_error', { error: result.reason?.message || String(result.reason) });
+       }
+     }
+      // Reset error counter on successful tick
+      if (scheduleConsecutiveErrors > 0) {
+        logDaemonEvent('schedule_tick_recovered', {
+          message: 'Tick succeeded after previous errors',
+          previousErrors: scheduleConsecutiveErrors,
+        });
+        scheduleConsecutiveErrors = 0;
       }
-    } catch (err) {
-      logDaemonEvent('schedule_tick_error', { error: err?.message || String(err) });
-    } finally {
-      scheduleRunning = false;
+   } catch (err) {
+      scheduleConsecutiveErrors++;
+      scheduleLastErrorTime = Date.now();
+      const backoffMs = SCHEDULE_ERROR_BACKOFF_BASE_MS * Math.pow(2, scheduleConsecutiveErrors - 1);
+      logDaemonEvent('schedule_tick_error', {
+        error: err?.message || String(err),
+        consecutiveErrors: scheduleConsecutiveErrors,
+        backoffMs,
+        maxErrors: SCHEDULE_MAX_CONSECUTIVE_ERRORS,
+      });
+      // Schedule a retry tick after backoff (capped at maxErrors)
+      if (scheduleConsecutiveErrors < SCHEDULE_MAX_CONSECUTIVE_ERRORS) {
+        setTimeout(() => { void scheduleTick(); }, backoffMs).unref();
+      } else {
+        logDaemonEvent('schedule_tick_max_errors', {
+          message: 'Max consecutive tick errors reached, waiting for next regular tick',
+          consecutiveErrors: scheduleConsecutiveErrors,
+        });
+        scheduleConsecutiveErrors = 0; // Reset for next regular tick cycle
+      }
+   } finally {
+    // Reset error counter on success (in try block)
+     scheduleRunning = false;
     }
   }
 

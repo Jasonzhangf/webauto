@@ -15,6 +15,7 @@ const ALWAYS_ON_COMMAND_TYPES = [
   'xhs-consumer',
   'weibo-producer',
   'weibo-consumer',
+  'weibo-special-follow-monitor',
 ];
 const ALL_SUPPORTED_COMMAND_TYPES = [...SUPPORTED_COMMAND_TYPES, ...ALWAYS_ON_COMMAND_TYPES];
 const DEFAULT_INTERVAL_MINUTES = 30;
@@ -28,7 +29,7 @@ const RESOURCE_CLAIMS_DIR = 'resource-claims';
 const DEFAULT_TASK_LEASE_MS = 30 * 60 * 1000;
 const DEFAULT_DAEMON_LEASE_MS = 2 * 60 * 1000;
 const DEFAULT_SCHEDULER_POLICY = Object.freeze({
-  maxConcurrency: 1,
+  maxConcurrency: 2,
   maxConcurrencyByPlatform: {},
   resourceMutex: {
     enabled: true,

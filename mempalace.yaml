@@ -1,0 +1,13 @@
+wing: webauto
+rooms:
+- name: modules
+  description: Core runtime modules
+- name: apps
+  description: Application entry points
+- name: documentation
+  description: Architecture and design docs
+- name: testing
+  description: Test files
+- name: general
+  description: Root level docs and config
+skip_dirs: [node_modules, dist, .git, .tmp, coverage, .beads, .claude, .codex, memory, .agents, .github, .iflow, scripts, bin, cli, runtime, services, infra, build]
