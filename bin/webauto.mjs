@@ -587,6 +587,35 @@ Examples:
 }
 
 
+
+function print1688Help() {
+  console.log('webauto 1688');
+  console.log('');
+  console.log('Usage:');
+  console.log('  webauto 1688 --help');
+  console.log('  webauto 1688 collect --profile <id> --keyword <kw> [options]');
+  console.log('');
+  console.log('1688 商品信息采集:');
+  console.log('  --profile <id>       配置好的 camo profile (如 1688-test-1)');
+  console.log('  --keyword <kw>       搜索关键词');
+  console.log('  --max-notes <n>      目标采集数量（默认 60）');
+  console.log('  --max-scrolls <n>    最大滚动次数（默认 10）');
+  console.log('  --do-shop-contact    是否采集店铺联系方式');
+  console.log('  --output-root <p>    自定义输出根目录');
+  console.log('  --env <name>         输出环境目录（默认 debug）');
+  console.log('');
+  console.log('输出路径:');
+  console.log('  ~/.webauto/download/1688/<env>/<keyword>/offer-info.jsonl');
+  console.log('  ~/.webauto/download/1688/<env>/<keyword>/shop-contact.jsonl');
+  console.log('');
+  console.log('Examples:');
+  console.log('  webauto 1688 collect --profile 1688-test-1 --keyword 蓝牙耳机');
+  console.log('  webauto 1688 collect --profile 1688-test-1 --keyword 数据线 --max-notes 100 --max-scrolls 15');
+  console.log('  webauto 1688 collect --profile 1688-test-1 --keyword 充电宝 --do-shop-contact');
+}
+
+
+
 async function run(cmd, args, options = {}) {
   await new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
@@ -750,6 +779,11 @@ async function main() {
       printXhsHelp();
       return;
     }
+    if (cmd === '1688') {
+      print1688Help();
+      return;
+    }
+
     if (cmd === 'version') {
       printVersionHelp();
       return;
@@ -999,7 +1033,24 @@ if (cmd === 'version') {
     return;
   }
 
-  if (cmd === 'xhs') {
+  
+  if (cmd === '1688') {
+    const subNormalized = String(sub || '').trim().toLowerCase();
+    if (subNormalized === 'help' || !subNormalized) {
+      print1688Help();
+      return;
+    }
+    if (subNormalized === 'collect') {
+      const script = path.join(ROOT, 'apps', 'webauto', 'entry', '1688-collect.mjs');
+      await run(process.execPath, [script, ...rawArgv.slice(2)]);
+      return;
+    }
+    console.error('Unknown 1688 subcommand: ' + subNormalized);
+    print1688Help();
+    process.exit(2);
+  }
+
+if (cmd === 'xhs') {
     const subNormalized = String(sub || '').trim().toLowerCase();
     const hasOnlyXhs = rawArgv.length === 1;
     const defaultToUnified = !subNormalized || subNormalized.startsWith('-');
