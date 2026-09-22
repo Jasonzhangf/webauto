@@ -344,17 +344,34 @@ export async function startSpecialFollowMonitor({
   let rounds = 0;
   let totalNew = 0;
   let lastResult = null;
+  let failedRound = null;
   for (let round = 1; round <= boundedRounds; round++) {
     if (process.env.WEBAUTO_JOB_STOPPING === 'true') break;
     const result = await inspectSpecialFollow({ runtime, browser, env, delayMs, users });
     lastResult = result;
     rounds++;
-    if (!result.success) break;
+    if (!result.success) {
+      failedRound = { round, error: result.error || 'inspect_failed', message: result.message || null };
+      break;
+    }
     totalNew += result.newCount;
     if (onRound) await onRound({ round, result, totalNew });
     if (round < boundedRounds) {
       await new Promise((resolve) => setTimeout(resolve, waitMs));
     }
+  }
+  if (failedRound) {
+    // A failed round must reach the scheduler as a failure, with the round
+    // evidence preserved.
+    return {
+      success: false,
+      rounds,
+      totalNew,
+      lastResult,
+      error: failedRound.error,
+      message: failedRound.message,
+      reason: 'inspect_failed',
+    };
   }
   return {
     success: true,

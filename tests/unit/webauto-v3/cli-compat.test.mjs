@@ -6,7 +6,11 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { readPostWithComments } from '../../../apps/webauto/weibo-v3/api-reader.mjs';
-import { applyVideoCopy, runWeiboCli } from '../../../apps/webauto/weibo-v3/cli.mjs';
+import {
+  applyVideoCopy,
+  finalizeVideoRun,
+  runWeiboCli,
+} from '../../../apps/webauto/weibo-v3/cli.mjs';
 import { WeiboBrowser } from '../../../apps/webauto/weibo-v3/browser.mjs';
 import { createWeiboRuntime } from '../../../apps/webauto/weibo-v3/runtime.mjs';
 import { collectProfile } from '../../../apps/webauto/weibo-v3/profile.mjs';
@@ -14,6 +18,7 @@ import { resolveVideo } from '../../../apps/webauto/weibo-v3/video.mjs';
 import { runConsumer } from '../../../apps/webauto/weibo-v3/workflows.mjs';
 import {
   inspectSpecialFollow,
+  startSpecialFollowMonitor,
   writeSpecialFollowUsers,
 } from '../../../apps/webauto/weibo-v3/special-follow.mjs';
 
@@ -179,8 +184,49 @@ test('the video command wires the copy side effect into its result', () => {
   const source = fs.readFileSync('apps/webauto/weibo-v3/cli.mjs', 'utf8');
   const command = source.slice(source.indexOf('async function videoCommand'));
   assert.equal(command.length > 0, true);
+  assert.match(command, /finalizeVideoRun\(\{ runtime, url, result \}\)/);
   assert.match(command, /const copied = applyVideoCopy\(\{ argv, result \}\)/);
   assert.match(command, /return \{ \.\.\.result, copied, runId: runtime\.runId/);
+});
+
+test('a video run never reports success when its artifact validation fails', () => {
+  const makeRuntime = () => {
+    const events = [];
+    return {
+      events,
+      recordArtifact({ artifactType, artifactId, payload }) {
+        return { artifact_id: artifactId, artifact_type: artifactType, artifact_generation: 1, content_digest: 'd', payload };
+      },
+      validateArtifact({ result }) {
+        events.push({ type: 'ArtifactValidated', result });
+        return { result };
+      },
+      finish(status, payload) {
+        events.push({ type: status === 'succeeded' ? 'RunCompleted' : 'RunFailed', payload });
+      },
+    };
+  };
+
+  const okRuntime = makeRuntime();
+  const ok = finalizeVideoRun({
+    runtime: okRuntime,
+    url: 'https://weibo.com/tv/show/1',
+    result: { videoUrl: 'https://cdn.example/v.mp4' },
+  });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(okRuntime.events.map((e) => e.type), ['ArtifactValidated', 'RunCompleted']);
+  assert.equal(okRuntime.events[0].result, 'pass');
+
+  const badRuntime = makeRuntime();
+  const bad = finalizeVideoRun({
+    runtime: badRuntime,
+    url: 'https://weibo.com/tv/show/1',
+    result: {},
+  });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.error, 'video_validation_failed');
+  assert.deepEqual(badRuntime.events.map((e) => e.type), ['ArtifactValidated', 'RunFailed']);
+  assert.equal(badRuntime.events[0].result, 'fail');
 });
 
 test('special-follow keeps the historical xhs-qa-1 default profile', async () => {
@@ -283,6 +329,94 @@ test('special-follow paces between users but never waits after the last one', as
     // Two gaps of 250ms, and crucially no third one after the final user.
     assert.equal(elapsed >= 500, true, `expected >=500ms of pacing, got ${elapsed}ms`);
     assert.equal(elapsed < 720, true, `expected no trailing wait, got ${elapsed}ms`);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
+});
+
+test('special-follow monitor reports an unsuccessful round as a failure', async () => {
+  const previousHome = process.env.HOME;
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'webauto-v3-monitor-failure-'));
+  const eventDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webauto-v3-monitor-failure-events-'));
+  process.env.HOME = sandbox;
+  try {
+    await writeSpecialFollowUsers([{ uid: '1', name: 'a' }, { uid: '2', name: 'b' }], { env: 'prod' });
+    const runtime = createWeiboRuntime({ runId: `monitor_failure_${Date.now()}`, eventDir });
+    // The second user read fails; the monitor must surface that round as a
+    // failure instead of reporting a clean sweep.
+    let reads = 0;
+    const browser = {
+      async goto() {},
+      async pageInfo() {
+        return {
+          url: 'https://m.weibo.cn/u/1',
+          title: 'profile',
+          viewport: { width: 390, height: 844 },
+          scroll: { x: 0, y: 0 },
+          textDigest: 'body',
+        };
+      },
+      async observeAnchors() {
+        return {};
+      },
+      async evaluate() {
+        reads++;
+        if (reads === 2) throw new Error('transport failed');
+        return { href: 'https://m.weibo.cn/detail/1', text: '' };
+      },
+    };
+    await assert.rejects(
+      () => startSpecialFollowMonitor({
+        runtime,
+        browser,
+        env: 'prod',
+        maxRounds: 1,
+        delayMs: 0,
+      }),
+      /page DAG failed: node_exception/,
+    );
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
+});
+
+test('special-follow monitor keeps a clean sweep successful', async () => {
+  const previousHome = process.env.HOME;
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'webauto-v3-monitor-ok-'));
+  const eventDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webauto-v3-monitor-ok-events-'));
+  process.env.HOME = sandbox;
+  try {
+    await writeSpecialFollowUsers([{ uid: '1', name: 'a' }], { env: 'prod' });
+    const runtime = createWeiboRuntime({ runId: `monitor_ok_${Date.now()}`, eventDir });
+    const browser = {
+      async goto() {},
+      async pageInfo() {
+        return {
+          url: 'https://m.weibo.cn/u/1',
+          title: 'profile',
+          viewport: { width: 390, height: 844 },
+          scroll: { x: 0, y: 0 },
+          textDigest: 'body',
+        };
+      },
+      async observeAnchors() {
+        return {};
+      },
+      async evaluate() {
+        return { href: 'https://m.weibo.cn/detail/1', text: '' };
+      },
+    };
+    const result = await startSpecialFollowMonitor({
+      runtime,
+      browser,
+      env: 'prod',
+      maxRounds: 1,
+      delayMs: 0,
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.rounds, 1);
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;

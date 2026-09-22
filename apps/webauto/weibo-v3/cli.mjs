@@ -63,6 +63,30 @@ export function applyVideoCopy({ argv = {}, result = {}, writeClipboardFn = writ
   return writeClipboardFn(result.videoUrl) === true;
 }
 
+// Records and validates the video artifact, then closes the run with a status
+// that matches the recorded verdict. A run is only successful when validation
+// passes; the durable event stream must never contradict itself.
+export function finalizeVideoRun({ runtime, url, result = {} } = {}) {
+  const artifact = runtime.recordArtifact({
+    artifactType: 'weibo-video',
+    artifactId: `video:${url}`,
+    payload: result,
+  });
+  const validated = runtime.validateArtifact({
+    artifact,
+    validationSpecId: 'weibo.video.v1',
+    result: result.videoUrl ? 'pass' : 'fail',
+    observedCount: result.videoUrl ? 1 : 0,
+    expectedCount: 1,
+  });
+  if (validated.result !== 'pass') {
+    runtime.finish('failed', { task_type: 'video', error: 'video_validation_failed' });
+    return { ok: false, error: 'video_validation_failed', message: 'no playable video URL resolved' };
+  }
+  runtime.finish('succeeded', { task_type: 'video' });
+  return { ok: true };
+}
+
 function output(result) {
   console.log(JSON.stringify(result, null, 2));
 }
@@ -418,19 +442,17 @@ async function videoCommand(argv) {
   const runtime = runtimeFor(argv);
   try {
     const result = await resolveVideo({ adapter: new CamoAdapter(), profileId, url });
-    const artifact = runtime.recordArtifact({
-      artifactType: 'weibo-video',
-      artifactId: `video:${url}`,
-      payload: result,
-    });
-    runtime.validateArtifact({
-      artifact,
-      validationSpecId: 'weibo.video.v1',
-      result: result.videoUrl ? 'pass' : 'fail',
-      observedCount: result.videoUrl ? 1 : 0,
-      expectedCount: 1,
-    });
-    runtime.finish('succeeded', { task_type: 'video' });
+    const finalized = finalizeVideoRun({ runtime, url, result });
+    if (!finalized.ok) {
+      return {
+        ok: false,
+        error: finalized.error,
+        message: finalized.message,
+        ...result,
+        runId: runtime.runId,
+        eventFile: runtime.eventStore.file(),
+      };
+    }
     const copied = applyVideoCopy({ argv, result });
     return { ...result, copied, runId: runtime.runId, eventFile: runtime.eventStore.file() };
   } catch (error) {
