@@ -1,48 +1,26 @@
 #!/usr/bin/env node
-import { parseArgs } from 'node:util';
+import minimist from 'minimist';
+import { pathToFileURL } from 'node:url';
+import { assertDaemonAdmission, runWeiboCli } from '../weibo-v3/cli.mjs';
 
-const daemonWorkerId = process.env.WEBAUTO_DAEMON_WORKER_ID || '';
-const daemonBypass = process.env.WEBAUTO_DAEMON_BYPASS === '1';
-if (!daemonWorkerId && !daemonBypass) {
-  console.error('❌ weibo-unified: 非 daemon 方式启动已禁止。请通过 webauto daemon task submit 启动。');
-  console.error('   调试: WEBAUTO_DAEMON_BYPASS=1 node bin/webauto.mjs weibo unified ...');
-  process.exit(1);
+export async function runWeiboUnified(argv = {}) {
+  return runWeiboCli('unified', argv);
 }
 
-import { runWeiboUnified, printWeiboUnifiedHelp } from './lib/weibo-unified-runner.mjs';
-
-export { runWeiboUnified } from './lib/weibo-unified-runner.mjs';
-
-const { values } = parseArgs({
-  options: {
-    'task-type': { type: 'string', default: 'timeline' },
-    profile: { type: 'string', default: 'weibo' },
-    target: { type: 'string', default: '50' },
-    env: { type: 'string', default: 'prod' },
-    date: { type: 'string' },
-    'output-root': { type: 'string' },
-    'scroll-delay': { type: 'string', default: '2500' },
-    'max-empty-scrolls': { type: 'string', default: '2' },
-    keyword: { type: 'string' },
-    'max-pages': { type: 'string', default: '3' },
-    'user-ids': { type: 'string' },
-    'with-detail': { type: 'string' },
-    help: { type: 'boolean', short: 'h' },
-  },
-  strict: false,
-});
-
-if (values.help) {
-  printWeiboUnifiedHelp();
-  process.exit(0);
+async function main() {
+  const argv = minimist(process.argv.slice(2));
+  if (!argv.help && !argv.h) assertDaemonAdmission();
+  const result = await runWeiboCli('unified', argv);
+  if (!result?.help) console.log(JSON.stringify(result, null, 2));
+  if (result?.ok === false || result?.success === false) process.exitCode = 1;
 }
 
-runWeiboUnified(values)
-  .then((result) => {
-    console.log(JSON.stringify(result, null, 2));
-    process.exit(result.ok ? 0 : 1);
-  })
-  .catch((err) => {
-    console.error(`[FATAL] ${err.message}`);
+const isDirectExec =
+  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectExec) {
+  main().catch((error) => {
+    console.error(error?.stack || error?.message || String(error));
     process.exit(1);
   });
+}

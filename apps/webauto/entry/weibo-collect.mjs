@@ -1,35 +1,14 @@
 #!/usr/bin/env node
 import minimist from 'minimist';
 import { pathToFileURL } from 'node:url';
-import { getWeiboCollectHelpLines, runWeiboCollect } from './lib/weibo-collect-runner.mjs';
-
-function printCollectHelp() {
-  console.log(getWeiboCollectHelpLines().join('\n'));
-}
+import { assertDaemonAdmission, runWeiboCli } from '../weibo-v3/cli.mjs';
 
 async function main() {
   const argv = minimist(process.argv.slice(2));
-  if (argv.help || argv.h) {
-    printCollectHelp();
-    return;
-  }
-
-  const daemonWorkerId = process.env.WEBAUTO_DAEMON_WORKER_ID || '';
-  const daemonBypass = process.env.WEBAUTO_DAEMON_BYPASS === '1';
-  if (!daemonWorkerId && !daemonBypass) {
-    console.error([
-      '❌ weibo-collect: 非 daemon 方式启动已禁止',
-      '',
-      '请通过 daemon 启动任务：',
-      '  webauto daemon start',
-      '  webauto daemon task submit -- weibo collect --profile <id> --keyword <kw> [options...]',
-      '',
-      '如需调试绕过（仅限开发环境）：',
-      '  WEBAUTO_DAEMON_BYPASS=1 node bin/webauto.mjs weibo collect ...',
-    ].join('\n'));
-    process.exit(1);
-  }
-  await runWeiboCollect(argv);
+  if (!argv.help && !argv.h) assertDaemonAdmission();
+  const result = await runWeiboCli('collect', argv);
+  if (!result?.help) console.log(JSON.stringify(result, null, 2));
+  if (result?.ok === false || result?.success === false) process.exitCode = 1;
 }
 
 const isDirectExec =

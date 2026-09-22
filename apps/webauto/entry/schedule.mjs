@@ -77,7 +77,7 @@ function killTrackedBrowserPids() {
 }
 
 let xhsRunnerPromise = null;
-let weiboRunnerPromise = null;
+const weiboRunnerPromises = new Map();
 
 async function getXhsRunner() {
   if (!xhsRunnerPromise) {
@@ -86,11 +86,26 @@ async function getXhsRunner() {
   return xhsRunnerPromise;
 }
 
-async function getWeiboRunner() {
-  if (!weiboRunnerPromise) {
-    weiboRunnerPromise = import('./weibo-unified.mjs').then((mod) => mod.runWeiboUnified);
+async function getWeiboRunner(commandType) {
+  const normalized = String(commandType || 'weibo-unified').trim();
+  if (!weiboRunnerPromises.has(normalized)) {
+    const load = (() => {
+      if (normalized === 'weibo-producer') {
+        return import('./weibo-producer-runner.mjs').then((mod) => mod.runWeiboProducerTask);
+      }
+      if (normalized === 'weibo-consumer') {
+        return import('./weibo-consumer-runner.mjs').then((mod) => mod.runWeiboConsumerTask);
+      }
+      if (normalized === 'weibo-special-follow-monitor') {
+        return import('./weibo-special-follow.mjs').then((mod) => (
+          (args = {}) => mod.runWeiboSpecialFollowTask({ ...args, subcommand: 'start' })
+        ));
+      }
+      return import('./weibo-unified.mjs').then((mod) => mod.runWeiboUnified);
+    })();
+    weiboRunnerPromises.set(normalized, load);
   }
-  return weiboRunnerPromise;
+  return weiboRunnerPromises.get(normalized);
 }
 
 function output(payload, jsonMode) {
@@ -410,8 +425,8 @@ async function executeTask(task, options = {}) {
         return runUnified(commandArgv);
       }
       if (commandType.startsWith('weibo-')) {
-        const runWeiboUnified = await getWeiboRunner();
-        return runWeiboUnified(commandArgv);
+        const runWeibo = await getWeiboRunner(commandType);
+        return runWeibo(commandArgv);
       }
       if (commandType === '1688-search') {
         throw new Error(`executor_not_implemented: ${commandType}`);
@@ -429,6 +444,9 @@ async function executeTask(task, options = {}) {
     });
     if (hasRiskControl) {
       throw new Error('risk_control_detected');
+    }
+    if (result?.ok === false || result?.success === false) {
+      throw new Error(result.error || result.message || `runner_failed: ${commandType}`);
     }
     const runResult = markScheduleTaskResult(task.id, {
       status: 'success',

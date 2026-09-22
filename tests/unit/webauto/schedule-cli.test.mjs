@@ -309,6 +309,59 @@ describe('schedule cli', () => {
     assert.equal(Number(runDueRes.failed) >= 1, true);
   });
 
+  it('records an explicit runner ok:false result as a failed task', () => {
+    const root = newRoot();
+    seedValidProfile(root, { profileId: 'weibo-1', platform: 'weibo', accountId: 'weibo-u1' });
+    const addRes = runSchedule([
+      'add',
+      '--name', 'weibo-run-fail',
+      '--command-type', 'weibo-user-profile',
+      '--schedule-type', 'once',
+      '--run-at', new Date(Date.now() - 10_000).toISOString(),
+      '--profile', 'weibo-1',
+      '--argv-json',
+      JSON.stringify({
+        profile: 'weibo-1',
+        'task-type': 'user-profile',
+        'user-ids': '123',
+        target: '1',
+        'output-root': path.join(root, 'download'),
+      }),
+      '--json',
+    ], root);
+
+    const runRes = runSchedule(['run', addRes.task.id, '--json'], root, 1);
+    assert.equal(runRes.ok, false);
+    assert.equal(runRes.result.runResult.lastStatus, 'failed');
+    assert.match(String(runRes.result.error || ''), /WEIBO_|empty|failed/i);
+  });
+
+  it('records an explicit runner success:false result as a failed task', () => {
+    const root = newRoot();
+    seedValidProfile(root, { profileId: 'weibo-1', platform: 'weibo', accountId: 'weibo-u1' });
+    const addRes = runSchedule([
+      'add',
+      '--name', 'weibo-special-follow-fail',
+      '--command-type', 'weibo-special-follow-monitor',
+      '--schedule-type', 'once',
+      '--run-at', new Date(Date.now() - 10_000).toISOString(),
+      '--profile', 'weibo-1',
+      '--argv-json',
+      JSON.stringify({
+        profile: 'weibo-1',
+        env: `missing-${path.basename(root)}`,
+        'max-rounds': '1',
+        delay: '1000',
+      }),
+      '--json',
+    ], root);
+
+    const runRes = runSchedule(['run', addRes.task.id, '--json'], root, 1);
+    assert.equal(runRes.ok, false);
+    assert.equal(runRes.result.runResult.lastStatus, 'failed');
+    assert.match(String(runRes.result.error || ''), /no_users|user list is empty/i);
+  });
+
   it('schedule run replaces unavailable historical profile with valid profile', () => {
     const root = newRoot();
     seedValidProfile(root, { profileId: 'profile-0', platform: 'xiaohongshu', accountId: 'xhs-u1' });

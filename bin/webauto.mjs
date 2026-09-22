@@ -752,14 +752,18 @@ async function main() {
       return;
     }
     if (cmd === "weibo") {
-      const weiboSub = String(args._[1] || "").trim();
-      if (weiboSub === "unified") {
-      script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
-    } else if (weiboSub === "detail") {
-        printWeiboDetailHelp();
-        return;
-      }
-      printWeiboHelp();
+      const weiboSub = String(args._[1] || "unified").trim();
+      const scriptBySub = {
+        unified: "weibo-unified.mjs",
+        detail: "weibo-detail.mjs",
+        video: "weibo-video.mjs",
+        collect: "weibo-collect.mjs",
+        producer: "weibo-producer-runner.mjs",
+        consumer: "weibo-consumer-runner.mjs",
+        "special-follow": "weibo-special-follow.mjs",
+      };
+      const script = path.join(ROOT, "apps", "webauto", "entry", scriptBySub[weiboSub] || "weibo-unified.mjs");
+      await run(process.execPath, [script, ...rawArgv.slice(1)]);
       return;
     }
 
@@ -824,21 +828,26 @@ async function main() {
   if (cmd === "weibo") {
     const weiboSub = String(args._[1] || "").trim();
     if (!weiboSub || weiboSub === "help") {
-      printWeiboHelp();
+      const script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
+      await run(process.execPath, [script, "--help"]);
       return;
     }
-    if (weiboSub === "detail" && (args.help || args.h)) {
-      printWeiboDetailHelp();
-      return;
-    }
-    let script;
-    if (weiboSub === "unified") {
-      script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
-    } else if (weiboSub === "detail") {
-      script = path.join(ROOT, "apps", "webauto", "entry", "weibo-detail.mjs");
-    } else {
-      script = path.join(ROOT, "apps", "webauto", "entry", "weibo-collect.mjs");
-    }
+    const scriptBySub = {
+      unified: "weibo-unified.mjs",
+      detail: "weibo-detail.mjs",
+      video: "weibo-video.mjs",
+      collect: "weibo-collect.mjs",
+      producer: "weibo-producer-runner.mjs",
+      consumer: "weibo-consumer-runner.mjs",
+      "special-follow": "weibo-special-follow.mjs",
+    };
+    const script = path.join(
+      ROOT,
+      "apps",
+      "webauto",
+      "entry",
+      scriptBySub[weiboSub] || "weibo-collect.mjs",
+    );
     await run(process.execPath, [script, ...rawArgv.slice(2)]);
     return;
   }
@@ -846,20 +855,20 @@ async function main() {
   // Handle weibo-timeline and weibo-watch commands from schedule daemon
   if (cmd === "weibo-timeline") {
     const script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
-    await run(process.execPath, [script, ...rawArgv.slice(1)]);
+    await run(process.execPath, [script, "--task-type", "timeline", ...rawArgv.slice(1)]);
     return;
   }
 
   if (cmd === "weibo-watch") {
     const script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
-    await run(process.execPath, [script, ...rawArgv.slice(1)]);
+    await run(process.execPath, [script, "--task-type", "monitor", ...rawArgv.slice(1)]);
     return;
   }
 
  // Handle weibo-user-profile from schedule daemon
  if (cmd === "weibo-user-profile") {
    const script = path.join(ROOT, "apps", "webauto", "entry", "weibo-unified.mjs");
-   await run(process.execPath, [script, ...rawArgv.slice(1)]);
+   await run(process.execPath, [script, "--task-type", "user-profile", ...rawArgv.slice(1)]);
    return;
  }
 
