@@ -251,6 +251,9 @@ sitecustomize.py
 clock-schedule-batch.sh
 clock.md
 
+# Isolated worktrees created under the project playground
+playground/
+
 # Finger agent state files (not project docs)
 TASK.md
 HEARTBEAT.md
