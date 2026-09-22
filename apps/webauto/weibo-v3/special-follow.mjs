@@ -3,13 +3,17 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { sanitizeForPath } from './artifacts.mjs';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function monitorDir(env = 'prod') {
-  return path.join(process.env.HOME || process.env.USERPROFILE || process.cwd(), '.webauto', 'weibo-special-follow', env);
+  // `env` is caller-supplied and becomes one path segment. It must never be
+  // able to escape the special-follow root via dot segments or separators.
+  const safeEnv = sanitizeForPath(env, 'prod');
+  return path.join(process.env.HOME || process.env.USERPROFILE || process.cwd(), '.webauto', 'weibo-special-follow', safeEnv);
 }
 
 export function userListPath(env = 'prod') {

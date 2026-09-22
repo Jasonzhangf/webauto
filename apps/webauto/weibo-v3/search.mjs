@@ -4,6 +4,36 @@
 import { WEIBO_ANCHORS } from './browser.mjs';
 import { normalizePost, dedupeBy } from './extract.mjs';
 
+const PAGER_TIMEOUT_MS = 15_000;
+const PAGER_POLL_MS = 250;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function firstResultSignature(page) {
+  const first = page?.posts?.[0];
+  return first ? `${first.mid || ''}|${first.url || ''}` : '';
+}
+
+// A pager click must produce an observable page transition before the next
+// page is read. Waiting on the result signature is anchor-driven: it returns
+// as soon as the first result changes and fails explicitly on timeout instead
+// of silently re-reading the previous page.
+async function waitForNextPage(browser, previousSignature) {
+  const deadline = Date.now() + PAGER_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await sleep(PAGER_POLL_MS);
+    const anchors = await browser.observeAnchors(WEIBO_ANCHORS.desktopSearch);
+    if ((anchors['result.list']?.count || 0) <= 0) continue;
+    const signature = firstResultSignature(await browser.evaluate(READ_SEARCH_PAGE));
+    if (signature && signature !== previousSignature) return;
+  }
+  const error = new Error('search pager did not advance: next page was not observable');
+  error.code = 'WEIBO_SEARCH_PAGER_STALLED';
+  throw error;
+}
+
 const READ_SEARCH_PAGE = `(() => {
   const seen = new Set();
   const posts = [];
@@ -87,8 +117,12 @@ export async function collectSearch({
     },
     extractors: {
       collect_pages: async () => {
+        let previousSignature = '';
         for (let pageNumber = 1; pageNumber <= maxPages; pageNumber++) {
-          if (pageNumber > 1) await browser.click(WEIBO_ANCHORS.desktopSearch['pager.next']);
+          if (pageNumber > 1) {
+            await browser.click(WEIBO_ANCHORS.desktopSearch['pager.next']);
+            await waitForNextPage(browser, previousSignature);
+          }
           const anchors = await browser.observeAnchors(WEIBO_ANCHORS.desktopSearch);
           if ((anchors['result.list']?.count || 0) <= 0) {
             state.tailReason = 'empty_result';
@@ -96,6 +130,7 @@ export async function collectSearch({
             break;
           }
           const page = await browser.evaluate(READ_SEARCH_PAGE);
+          previousSignature = firstResultSignature(page);
           const posts = (page?.posts || []).map((post) => normalizePost(post));
           state.visited.push({ page: pageNumber, posts: posts.length, url: page?.url || null });
           state.found.push(...posts);
@@ -118,7 +153,10 @@ export async function collectSearch({
     },
   });
   if (pageResult.status !== 'succeeded') {
-    throw new Error(`search page DAG failed for ${keyword}: ${pageResult.reason_code || pageResult.verdict || pageResult.status}`);
+    const detail = pageResult.message || pageResult.reason_code || pageResult.verdict || pageResult.status;
+    const error = new Error(`search page DAG failed for ${keyword}: ${detail}`);
+    error.code = pageResult.reason_code || 'WEIBO_SEARCH_PAGE_FAILED';
+    throw error;
   }
   return {
     topic: keyword,

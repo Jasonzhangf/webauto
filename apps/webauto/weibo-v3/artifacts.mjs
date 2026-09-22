@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
-function sanitizeForPath(name, fallback = 'unknown') {
+export function sanitizeForPath(name, fallback = 'unknown') {
   const text = String(name || '').trim();
   if (!text) return fallback;
   const cleaned = text

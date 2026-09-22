@@ -19,6 +19,7 @@ import { runConsumer } from '../../../apps/webauto/weibo-v3/workflows.mjs';
 import {
   inspectSpecialFollow,
   startSpecialFollowMonitor,
+  userListPath,
   writeSpecialFollowUsers,
 } from '../../../apps/webauto/weibo-v3/special-follow.mjs';
 
@@ -379,6 +380,30 @@ test('special-follow monitor reports an unsuccessful round as a failure', async 
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
+  }
+});
+
+test('special-follow env cannot escape the monitor root', () => {
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'webauto-v3-special-follow-root-'));
+  process.env.HOME = sandbox;
+  delete process.env.USERPROFILE;
+  try {
+    const root = path.join(sandbox, '.webauto', 'weibo-special-follow');
+    for (const env of ['..', '.', '../..', 'a/../../b']) {
+      const filePath = userListPath(env);
+      assert.equal(
+        filePath.startsWith(root + path.sep),
+        true,
+        `env ${env} escaped the special-follow root: ${filePath}`,
+      );
+    }
+    assert.equal(userListPath('prod'), path.join(root, 'prod', 'users.json'));
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile !== undefined) process.env.USERPROFILE = previousUserProfile;
   }
 });
 

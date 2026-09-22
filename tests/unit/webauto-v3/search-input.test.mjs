@@ -69,6 +69,7 @@ test('search enters the keyword in the page input and never navigates a query UR
 test('a search URL built from the keyword is not used even for later pages', async () => {
   const runtime = makeRuntime();
   const gotos = [];
+  let pageReads = 0;
   const browser = {
     async setViewport() {},
     async goto(url) { gotos.push(String(url)); },
@@ -88,9 +89,10 @@ test('a search URL built from the keyword is not used even for later pages', asy
       return { 'result.list': { selector: '.card-wrap', count: 1, visible: true } };
     },
     async evaluate() {
+      pageReads++;
       return {
         url: 'https://s.weibo.com/weibo',
-        posts: [{ mid: 'AbC123', url: 'https://weibo.com/1/AbC123', text: 'fixture' }],
+        posts: [{ mid: pageReads === 1 ? 'AbC123' : 'DeF456', url: `https://weibo.com/1/${pageReads === 1 ? 'AbC123' : 'DeF456'}`, text: 'fixture' }],
         pages: [1, 2],
       };
     },
@@ -101,4 +103,87 @@ test('a search URL built from the keyword is not used even for later pages', asy
   for (const url of gotos) {
     assert.ok(!url.includes('AI'), `keyword must not appear in a navigated URL: ${url}`);
   }
+});
+
+test('a later page is only read after the pager transition is observable', async () => {
+  const runtime = makeRuntime();
+  const reads = [];
+  let signature = 'first';
+  const browser = {
+    async setViewport() {},
+    async goto() {},
+    async fillInput() {},
+    async pressKey() {},
+    async click() {},
+    async pageInfo() {
+      return {
+        url: 'https://s.weibo.com/weibo',
+        title: '微博搜索',
+        viewport: { width: 1440, height: 900 },
+        scroll: { x: 0, y: 0 },
+        textDigest: 'fixture',
+      };
+    },
+    async observeAnchors() {
+      return { 'result.list': { selector: '.card-wrap', count: 1, visible: true } };
+    },
+    async evaluate() {
+      reads.push(signature);
+      return {
+        url: 'https://s.weibo.com/weibo',
+        posts: [{ mid: signature, url: `https://weibo.com/1/${signature}`, text: 'fixture' }],
+        pages: [1, 2],
+      };
+    },
+  };
+
+  // Simulate the page content changing only on the second poll after the
+  // click: the extractor must not read the stale first page in between.
+  browser.click = async () => {
+    setTimeout(() => { signature = 'second'; }, 300);
+  };
+
+  const result = await collectSearch({ runtime, browser, topic: 'AI眼镜', maxPages: 2, limit: 10 });
+  // Page 1 is read before any click. After the click the extractor polls until
+  // the first result changes, and only then reads page 2.
+  assert.deepEqual(reads.slice(0, 2), ['first', 'first']);
+  assert.equal(reads[reads.length - 1], 'second');
+  assert.equal(reads.includes('first') && reads.indexOf('second') > reads.indexOf('first'), true);
+  assert.deepEqual(result.posts.map((post) => post.mid), ['first', 'second']);
+});
+
+test('a stalled pager fails explicitly instead of re-reading the same page', async () => {
+  const runtime = makeRuntime();
+  const browser = {
+    async setViewport() {},
+    async goto() {},
+    async fillInput() {},
+    async pressKey() {},
+    async click() {},
+    async pageInfo() {
+      return {
+        url: 'https://s.weibo.com/weibo',
+        title: '微博搜索',
+        viewport: { width: 1440, height: 900 },
+        scroll: { x: 0, y: 0 },
+        textDigest: 'fixture',
+      };
+    },
+    async observeAnchors() {
+      return { 'result.list': { selector: '.card-wrap', count: 1, visible: true } };
+    },
+    async evaluate() {
+      // The list never changes, so the pager transition is never observable.
+      return {
+        url: 'https://s.weibo.com/weibo',
+        posts: [{ mid: 'stuck', url: 'https://weibo.com/1/stuck', text: 'fixture' }],
+        pages: [1, 2, 3],
+      };
+    },
+  };
+
+  await assert.rejects(
+    () => collectSearch({ runtime, browser, topic: 'AI眼镜', maxPages: 2, limit: 10 }),
+    /pager did not advance/,
+  );
 });
