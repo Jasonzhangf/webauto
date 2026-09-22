@@ -150,3 +150,52 @@ test('consumer continues after one detail fails and records the failure', async 
   assert.equal(fs.existsSync(path.join(detailContext.keywordDir, 'FirstFail', 'detail-meta.json')), false);
   assert.equal(fs.existsSync(path.join(detailContext.keywordDir, 'SecondOk', 'detail-meta.json')), true);
 });
+
+test('a failed consumer link is retried and completed links are not re-collected', async () => {
+  const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'webauto-v3-consumer-retry-'));
+  const date = '2026-09-20';
+  const context = resolveTimelineContext({ date, outputRoot });
+  const links = [
+    { url: 'https://m.weibo.cn/detail/FirstFail' },
+    { url: 'https://m.weibo.cn/detail/SecondOk' },
+  ];
+  fs.mkdirSync(path.dirname(context.linksPath), { recursive: true });
+  fs.writeFileSync(context.linksPath, `${links.map((link) => JSON.stringify(link)).join('\n')}\n`, 'utf8');
+
+  const browser = makeBrowser();
+  const originalGoto = browser.goto;
+  let failFirstTimes = 1;
+  const visited = [];
+  browser.goto = async (url) => {
+    visited.push(String(url));
+    if (String(url).includes('FirstFail') && failFirstTimes > 0) {
+      failFirstTimes--;
+      throw new Error('fixture navigation failed');
+    }
+    return originalGoto(url);
+  };
+
+  const result = await runConsumer({
+    runtime: makeRuntime('consumer_retry'),
+    browser,
+    taskType: 'timeline',
+    outputRoot,
+    date,
+    maxPosts: 0,
+    commentsEnabled: false,
+    idleIntervalMs: 10,
+    stopWhenIdle: true,
+  });
+  // FirstFail failed once and then succeeded on the retry; SecondOk was
+  // collected exactly once. A positional cursor would have skipped FirstFail
+  // for the rest of the process and never written its detail.
+  assert.equal(result.failed, 1);
+  const detailContext = resolveDetailContext({ keyword: 'timeline:2026-09-20', outputRoot });
+  assert.equal(fs.existsSync(path.join(detailContext.keywordDir, 'FirstFail', 'detail-meta.json')), true);
+  assert.equal(fs.existsSync(path.join(detailContext.keywordDir, 'SecondOk', 'detail-meta.json')), true);
+  assert.equal(
+    visited.filter((url) => url.includes('SecondOk')).length,
+    1,
+    'a completed link must not be collected twice',
+  );
+});

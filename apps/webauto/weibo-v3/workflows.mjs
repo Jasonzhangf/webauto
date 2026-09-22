@@ -1,20 +1,35 @@
 // Weibo workflow DAGs. Producer and consumer preserve their always-on
 // semantics but now call the v3 collection modules.
 
+import fs from 'node:fs';
 import {
   appendLog,
   mergePosts,
   readJsonl,
   resolveKeywordContext,
+  resolveDetailContext,
   resolveTimelineContext,
   writeLinks,
 } from './artifacts.mjs';
 import { collectDetail } from './detail.mjs';
+import { postIdFromUrl } from './extract.mjs';
 import { collectProfile, collectTimeline } from './profile.mjs';
 import { collectSearch } from './search.mjs';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function detailCompleted(context, link) {
+  const mid = link.mid || link.id || postIdFromUrl(link.url);
+  if (!mid) return false;
+  const detail = resolveDetailContext({
+    keyword: context.keyword,
+    env: context.env,
+    outputRoot: context.root,
+    postId: mid,
+  });
+  return fs.existsSync(detail.metaPath);
 }
 
 export async function runProducer({
@@ -132,13 +147,19 @@ export async function runConsumer({
       };
     }
     const links = await readJsonl(ctx.linksPath, { missingOk: true });
-    const pending = links.slice(processed);
+    // Work is derived from durable completion, not a positional cursor: a link
+    // whose detail artifact does not exist is still pending, so a transient
+    // failure is retried instead of being skipped for the life of this
+    // process. Links that already produced a detail are never collected twice,
+    // because their detail artifact makes them non-pending.
+    const pending = links.filter((link) => !detailCompleted(ctx, link));
     if (pending.length === 0) {
       idleRounds++;
       if (stopWhenIdle) break;
       await sleep(idleIntervalMs);
       continue;
     }
+    let progressed = false;
     for (const link of pending) {
       if (maxPosts > 0 && processed >= maxPosts) break;
       try {
@@ -159,6 +180,7 @@ export async function runConsumer({
           expandAllReplies,
           force: false,
         });
+        progressed = true;
       } catch (error) {
         failed++;
         lastError = error?.message || String(error);
@@ -166,13 +188,16 @@ export async function runConsumer({
       }
       processed++;
     }
+    // Every pending link failed this pass. Sleep before retrying so an
+    // always-on consumer backs off instead of hot-looping on a link that is
+    // failing right now.
+    if (!progressed && maxPosts <= 0) await sleep(idleIntervalMs);
   }
   return {
     // A detail that failed is a real failure for this run. Reporting ok while
     // only exposing a miscount would let the scheduler mark the task successful
     // and record success for a queue that did not drain, so the failed count is
-    // authoritative: the run fails and the queue tail stays pending, which
-    // makes the next run retry exactly those links.
+    // authoritative. The failed link stays pending and the next run retries it.
     ok: failed === 0,
     processed,
     failed,
