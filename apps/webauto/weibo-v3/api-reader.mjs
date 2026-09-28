@@ -217,11 +217,13 @@ export async function readReplies(browser, mid, comment, {
     const url = maxId
       ? `${base}&max_id=${encodeURIComponent(maxId)}&max_id_type=0`
       : `${base}&max_id=0&max_id_type=0`;
-    const { payload } = await fetchPage(browser, replyPageScript(url, referer), attempts, retryDelayMs);
+    const { payload, reason } = await fetchPage(browser, replyPageScript(url, referer), attempts, retryDelayMs);
     if (!payload || !payload.ok) {
-      // Replies are optional enrichment, but a rejected reply API must not be
-      // reported as an empty-but-complete reply set.
-      throw new Error(`reply API failed for ${comment.id}`);
+      // Replies are optional enrichment. A refused reply endpoint is reported
+      // on the comment instead of discarding the collected status and comments,
+      // but it is never labelled a complete reply set.
+      out.replyTailReason = page === 0 ? 'api_unavailable' : `page_blocked:${reason || 'api_not_ok'}`;
+      return out;
     }
     for (const row of payload.rows || []) {
       const reply = normalizeReplyRow(row);
@@ -260,6 +262,12 @@ export async function readPostWithComments(browser, mid, options = {}) {
         attempts: options.replyAttempts ?? 2,
         retryDelayMs: options.replyRetryDelayMs ?? 3000,
       });
+      // A refused reply API leaves the reason on the reply list; move it onto
+      // the comment so a caller can report it without reading an array field.
+      if (comment.replies.replyTailReason) {
+        comment.replyTailReason = comment.replies.replyTailReason;
+        delete comment.replies.replyTailReason;
+      }
     }
   }
   return { status, comments: commentList, commentTailReason: tailReason };

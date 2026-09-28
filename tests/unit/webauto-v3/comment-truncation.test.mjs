@@ -212,3 +212,36 @@ test('a cursor that stops producing new comments ends the walk instead of loopin
   assert.equal(result.length, 1);
   assert.equal(result.tailReason, 'no_progress');
 });
+
+test('a refused reply endpoint is reported per comment instead of failing the post', async () => {
+  // hotFlowChild answers non-JSON for a cid. That refusal comes back as an
+  // __error-bearing object (transport intact), so it must be reported on the
+  // comment -- not thrown away with the collected status and comments, and not
+  // labelled a complete reply set.
+  let replyTries = 0;
+  const browser = {
+    async fetchJson() {
+      return STATUS;
+    },
+    async evaluate(script) {
+      if (!String(script).includes('hotFlowChild')) {
+        return pagePayload([{ id: 'c1', text: 'first', total_number: 2 }], { maxId: null });
+      }
+      replyTries += 1;
+      return blocked('SyntaxError: JSON.parse: unexpected character');
+    },
+  };
+
+  const result = await readPostWithComments(browser, MID, {
+    commentRetryDelayMs: 0,
+    replyRetryDelayMs: 0,
+    minPageIntervalMs: 0,
+  });
+
+  assert.equal(result.commentTailReason, 'no_more_pages');
+  assert.equal(result.comments.length, 1);
+  assert.equal(result.comments[0].replies.length, 0);
+  assert.equal(result.comments[0].replyTailReason, 'api_unavailable');
+  assert.equal(replyTries, 2, 'the refused reply page must be retried once');
+  assert.equal('replyTailReason' in result.comments[0].replies, false);
+});
