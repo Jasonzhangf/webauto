@@ -121,7 +121,9 @@ export async function readComments(browser, mid, {
   const seen = new Set();
   let maxId = null;
   let maxIdType = 0;
-  let tailReason = 'limit_reached';
+  // Fallback label for a walk that consumed every allowed page without the
+  // limit or the cursor terminating it first.
+  let tailReason = 'pages_exhausted';
 
   for (let page = 0; page < maxPages; page++) {
     const pageStartedAt = Date.now();
@@ -182,6 +184,8 @@ export async function readComments(browser, mid, {
 }
 
 function setTailReason(list, reason) {
+  // Implementation detail consumed only by readPostWithComments, which moves it
+  // onto the result object. Callers must not rely on seeing it on the array.
   list.tailReason = reason;
   return list;
 }

@@ -11,11 +11,11 @@ const STATUS = { data: { id: MID, text: 'body', user: { id: 1, screen_name: 'aut
 
 function pagePayload(rows, extra = {}) {
   return {
-    ok: true,
     maxId: 'cursor-next',
     maxIdType: 0,
     rows,
     ...extra,
+    ok: extra.ok ?? true,
   };
 }
 
@@ -73,6 +73,33 @@ test('a refused comment API that never serves a single page reports api_unavaila
   assert.equal(pages, 2);
   assert.equal(result.length, 0);
   assert.equal(result.tailReason, 'api_unavailable');
+});
+
+test('readComments reports api_not_ok when the endpoint answers without the success flag', async () => {
+  // The first page succeeds and sets a cursor. The follow-up page is served,
+  // but the endpoint answers without ok -- the classic rate-limit shape. The
+  // reader must stop and say so instead of looping on the same page.
+  let pages = 0;
+  const browser = {
+    async fetchJson() {
+      return STATUS;
+    },
+    async evaluate() {
+      pages += 1;
+      return pages === 1
+        ? pagePayload([{ id: 'c1', text: 'first', total_number: 0 }], { maxId: 'cursor-1' })
+        : pagePayload([], { ok: 0 });
+    },
+  };
+
+  const result = await readComments(browser, MID, {
+    retryDelayMs: 0,
+    minPageIntervalMs: 0,
+  });
+
+  assert.equal(pages, 2);
+  assert.equal(result.length, 1);
+  assert.equal(result.tailReason, 'api_not_ok');
 });
 
 test('readPostWithComments reports the truncation without polluting the comment list', async () => {
