@@ -1,0 +1,65 @@
+{
+  "id": "computeruse-branch",
+  "version": "1",
+  "inputs": [
+    { "id": "screen_request", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "capture_screen",
+      "operator": "camo.snapshot",
+      "operator_version": "1",
+      "inputs": ["screen_request"],
+      "output": { "id": "screen_observation", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "config": {
+        "pacingMs": 0,
+        "jitterMs": 0,
+        "preValidation": true,
+        "postValidation": true,
+        "riskCheckpoint": true
+      }
+    },
+    {
+      "id": "resolve_target_region",
+      "operator": "computeruse.resolve_region",
+      "operator_version": "1",
+      "inputs": ["screen_observation"],
+      "output": { "id": "target_region", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "config": {
+        "pacingMs": 0,
+        "jitterMs": 0,
+        "preValidation": true,
+        "postValidation": true,
+        "riskCheckpoint": true
+      }
+    },
+    {
+      "id": "execute_system_action",
+      "operator": "computeruse.system_action",
+      "operator_version": "1",
+      "inputs": ["target_region"],
+      "output": { "id": "action_result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "config": {
+        "pacingMs": 0,
+        "jitterMs": 0,
+        "preValidation": true,
+        "postValidation": true,
+        "riskCheckpoint": true
+      }
+    }
+  ],
+  "edges": [
+    { "from": "capture_screen", "to": "resolve_target_region", "arc_id": "screen_observation" },
+    { "from": "resolve_target_region", "to": "execute_system_action", "arc_id": "target_region" }
+  ],
+  "outputs": ["action_result"]
+}

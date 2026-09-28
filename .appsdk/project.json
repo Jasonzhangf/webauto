@@ -1,0 +1,63 @@
+{
+  "access": {
+    "protected_paths": [
+      ".appsdk/**",
+      "docs/dagpipe/**",
+      "apps/webauto/resources/container-library/**"
+    ]
+  },
+  "governance": {
+    "active_kind": "immutable_consumable_library",
+    "playground_retention": "archive_then_remove",
+    "playground_root": "playground/**",
+    "promotion_requires": [
+      "experiment_evidence",
+      "unique_owner",
+      "required_gates"
+    ],
+    "protected_kinds": [
+      "contracts",
+      "history"
+    ]
+  },
+  "modules": {
+    "webauto-governance": {
+      "active_artifact": "docs/dagpipe/owners.json",
+      "input_paths": [
+        ".appsdk/**",
+        "docs/dagpipe/**",
+        "AGENTS.md",
+        "apps/webauto/weibo-v3/**",
+        "modules/webauto-v3/**",
+        "modules/operations/**",
+        "modules/container-registry/**",
+        "modules/camo-backend/**",
+        "tests/unit/dagpipe/**",
+        "package.json"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "program": "sh",
+          "args": [
+            "-c",
+            "node --test tests/unit/dagpipe/test-dagpipe-graphs.test.mjs && for g in docs/dagpipe/*.graph.json; do dagpipe graph validate \"$g\" || exit 1; done"
+          ],
+          "working_directory": "."
+        },
+        "minimum_test_count": 6,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "webauto-governance-regression"
+      },
+      "source_owner": "webauto-governance",
+      "stage": "contract_bound"
+    }
+  }
+}

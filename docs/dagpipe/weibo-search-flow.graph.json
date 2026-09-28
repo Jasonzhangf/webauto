@@ -1,0 +1,47 @@
+{
+  "id": "weibo-search-flow",
+  "version": "1",
+  "inputs": [
+    { "id": "search_request", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "open",
+      "operator": "camo.goto",
+      "operator_version": "1",
+      "inputs": ["search_request"],
+      "output": { "id": "opened_search_page", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "config": {
+        "pacingMs": 0,
+        "jitterMs": 0,
+        "preValidation": true,
+        "postValidation": true,
+        "riskCheckpoint": false
+      }
+    },
+    {
+      "id": "collect_pages",
+      "operator": "camo.extract",
+      "operator_version": "1",
+      "inputs": ["opened_search_page"],
+      "output": { "id": "search_payload", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "config": {
+        "pacingMs": 0,
+        "jitterMs": 0,
+        "preValidation": true,
+        "postValidation": true,
+        "riskCheckpoint": false
+      }
+    }
+  ],
+  "edges": [
+    { "from": "open", "to": "collect_pages", "arc_id": "opened_search_page" }
+  ],
+  "outputs": ["search_payload"]
+}

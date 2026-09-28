@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "gates": [
+    {
+      "gate_id": "dagpipe_graph_valid",
+      "command": "sh -c 'for g in docs/dagpipe/*.graph.json; do dagpipe graph validate \"$g\" || exit 1; done'",
+      "human_contract": "Every weibo flow graph and the computeruse branch graph must pass dagpipe static validate (SESE, acyclic, deterministic waves). This is the pre-execution gate; dagpipe does not execute, PageDagRuntime/camo runtime owns execution.",
+      "required_for": ["compile", "review_admission", "freeze", "promotion"]
+    },
+    {
+      "gate_id": "dagpipe_owner_drift",
+      "command": "node --test tests/unit/dagpipe/test-dagpipe-graphs.test.mjs",
+      "human_contract": "owners.json is the single source of truth; every graph node maps to a real code owner with exact file+line+symbol, and the contract test asserts the symbol is on that line. Catches drift a hardcoded expectation cannot.",
+      "required_for": ["review_admission", "freeze", "promotion"]
+    },
+    {
+      "gate_id": "container_library_root_isolation",
+      "command": "sh -c 'test -f apps/webauto/resources/container-library.index.json && node -e \"const i=require(\"./apps/webauto/resources/container-library.index.json\"); const keys=Object.keys(i); if(!keys.length)throw new Error(\"no sites\"); for(const k of keys){if(!i[k].website)throw new Error(k+\" missing website\")}\"'",
+      "human_contract": "Container library is organized by root domain (site key -> website); different sites are physically isolated in separate directories. This is the framework's isolation invariant.",
+      "required_for": ["review_admission", "architecture_stable"]
+    },
+    {
+      "gate_id": "regression_report",
+      "command": "sh -c 'node --test tests/unit/dagpipe/test-dagpipe-graphs.test.mjs'",
+      "human_contract": "webauto governance regression suite: dagpipe graph contracts + owner drift detection. Minimum 6 tests (one per graph-shape assertion).",
+      "required_for": ["freeze", "promotion"]
+    },
+    {
+      "gate_id": "vcs_clean",
+      "command": "appsdk verify webauto-governance",
+      "required_for": ["freeze"]
+    }
+  ]
+}

@@ -693,3 +693,13 @@ await callAPI('keyboard:type', { profileId, text: keyword, delay: 65 });
 // ✅ 正确：用 keyboard:press 按快捷键
 await pressKey(profileId, 'Enter');
 ```
+
+## 12) DAGpipe 治理闭环（强制）
+
+1. **图真源**：`docs/dagpipe/*.graph.json` 为微博 v3 各 flow（detail/search/profile/timeline）、producer-consumer 链与 computeruse 分支的 SESE DAG 真源；`docs/dagpipe/owners.json` 为节点→operator→真实代码 owner 的映射真源。
+2. **静态门禁前置**：`dagpipe graph validate` 必须在执行前 PASS；校验失败返回 `E_GRAPH_INVALID`，禁止绕过。dagpipe CLI 只做静态校验，不执行业务代码；图执行由 `PageDagRuntime`（modules/webauto-v3/src/page-dag.mjs）与 camo autoscript runtime 各自承担。
+3. **owner 漂移检测**：`tests/unit/dagpipe/test-dagpipe-graphs.test.mjs` 断言 owners.json 每个节点的 symbol 真在引用 file:line；图、owners.json、真实代码三者不得漂移。
+4. **AppSDK 治理**：`.appsdk/project.json` 定义 `webauto-governance-regression` 回归套件（minimum_test_count:6）；`.appsdk/maps/verification-map.json` 登记 dagpipe_graph_valid / dagpipe_owner_drift / container_library_root_isolation / regression_report / vcs_clean 五个 gate。
+5. **根域隔离不变式**：容器库 `apps/webauto/resources/container-library/` 按根域组织目录（cbu→1688.com、xiaohongshu→xiaohongshu.com、default），不同网站物理隔离；`container-library.index.json` 索引每个根域 site key→website。
+6. **computeruse 分支**：作为容器框架的一个分支，用屏幕区域（region）而非 CSS selector；operator 为 `computeruse.resolve_region` + `computeruse.system_action`，落点 `modules/operations/src/executor.ts` 的 `systemInput`（mouseMove/mouseClick）；computeruse 节点全部开启 `riskCheckpoint`。
+7. **payload 分离**：控制真源只走 `EventStore`（追加式 JSONL，重放不重执行终态）与 typed guard result；业务 payload、metadata、调试日志不得承载控制状态。

@@ -1,0 +1,47 @@
+{
+  "id": "weibo-profile-flow",
+  "version": "1",
+  "inputs": [
+    { "id": "profile_request", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "open",
+      "operator": "camo.goto",
+      "operator_version": "1",
+      "inputs": ["profile_request"],
+      "output": { "id": "opened_profile_page", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "config": {
+        "pacingMs": 0,
+        "jitterMs": 0,
+        "preValidation": true,
+        "postValidation": true,
+        "riskCheckpoint": false
+      }
+    },
+    {
+      "id": "collect_posts",
+      "operator": "camo.extract",
+      "operator_version": "1",
+      "inputs": ["opened_profile_page"],
+      "output": { "id": "profile_payload", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "config": {
+        "pacingMs": 0,
+        "jitterMs": 0,
+        "preValidation": true,
+        "postValidation": true,
+        "riskCheckpoint": false
+      }
+    }
+  ],
+  "edges": [
+    { "from": "open", "to": "collect_posts", "arc_id": "opened_profile_page" }
+  ],
+  "outputs": ["profile_payload"]
+}

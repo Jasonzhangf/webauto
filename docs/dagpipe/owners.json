@@ -1,0 +1,206 @@
+{
+  "_comment": "Single source of truth for webauto DAGpipe governance: graph node -> operator -> real code owner. The graph JSON files and the plan must not drift from this file. `symbol` is text that must appear at `line` in `file`; tests/test_dagpipe_graphs.mjs resolves every entry against the real source. DAGpipe performs static validation only; graph execution is owned by PageDagRuntime (modules/webauto-v3/src/page-dag.mjs) and camo autoscript runtime respectively.",
+  "graphs": {
+    "weibo-detail-flow": {
+      "file": "weibo-detail-flow.graph.json",
+      "nodes": [
+        {
+          "id": "open",
+          "operator": "camo.goto",
+          "operator_version": "1",
+          "owner": "apps/webauto/weibo-v3/detail.mjs",
+          "line": 64,
+          "symbol": "node_id: 'open'",
+          "note": "Act goto open detail page; executor calls browser.goto"
+        },
+        {
+          "id": "extract",
+          "operator": "camo.extract",
+          "operator_version": "1",
+          "owner": "apps/webauto/weibo-v3/detail.mjs",
+          "line": 70,
+          "symbol": "node_id: 'extract'",
+          "note": "Extract detail content + comments via extractDetailPage"
+        }
+      ],
+      "boundary": [
+        {
+          "stage": "PageDagRuntime 执行配置节点",
+          "owner": "modules/webauto-v3/src/page-dag.mjs",
+          "line": 107,
+          "symbol": "async run(identity",
+          "reason": "Runtime execution, outside the static graph"
+        }
+      ]
+    },
+    "weibo-search-flow": {
+      "file": "weibo-search-flow.graph.json",
+      "nodes": [
+        {
+          "id": "open",
+          "operator": "camo.goto",
+          "operator_version": "1",
+          "owner": "apps/webauto/weibo-v3/search.mjs",
+          "line": 97,
+          "symbol": "node_id: 'open'",
+          "note": "Act goto https://s.weibo.com/weibo"
+        },
+        {
+          "id": "collect_pages",
+          "operator": "camo.extract",
+          "operator_version": "1",
+          "owner": "apps/webauto/weibo-v3/search.mjs",
+          "line": 104,
+          "symbol": "node_id: 'collect_pages'",
+          "note": "Extract paginated search results with dedup"
+        }
+      ],
+      "boundary": [
+        {
+          "stage": "PageDagRuntime 执行配置节点",
+          "owner": "modules/webauto-v3/src/page-dag.mjs",
+          "line": 107,
+          "symbol": "async run(identity",
+          "reason": "Runtime execution, outside the static graph"
+        }
+      ]
+    },
+    "weibo-profile-flow": {
+      "file": "weibo-profile-flow.graph.json",
+      "nodes": [
+        {
+          "id": "open",
+          "operator": "camo.goto",
+          "operator_version": "1",
+          "owner": "apps/webauto/weibo-v3/profile.mjs",
+          "line": 155,
+          "symbol": "node_id: 'open'",
+          "note": "Act goto /u/{uid} profile page"
+        },
+        {
+          "id": "collect_posts",
+          "operator": "camo.extract",
+          "operator_version": "1",
+          "owner": "apps/webauto/weibo-v3/profile.mjs",
+          "line": 162,
+          "symbol": "node_id: 'collect_posts'",
+          "note": "Extract rendered profile posts"
+        }
+      ],
+      "boundary": [
+        {
+          "stage": "PageDagRuntime 执行配置节点",
+          "owner": "modules/webauto-v3/src/page-dag.mjs",
+          "line": 107,
+          "symbol": "async run(identity",
+          "reason": "Runtime execution, outside the static graph"
+        }
+      ]
+    },
+    "weibo-timeline-flow": {
+      "file": "weibo-timeline-flow.graph.json",
+      "nodes": [
+        {
+          "id": "open",
+          "operator": "camo.goto",
+          "operator_version": "1",
+          "owner": "apps/webauto/weibo-v3/profile.mjs",
+          "line": 216,
+          "symbol": "node_id: 'open'",
+          "note": "Act goto https://weibo.com (timeline home); collectTimeline reuses profile extractor"
+        },
+        {
+          "id": "collect_posts",
+          "operator": "camo.extract",
+          "operator_version": "1",
+          "owner": "apps/webauto/weibo-v3/profile.mjs",
+          "line": 223,
+          "symbol": "node_id: 'collect_posts'",
+          "note": "Extract timeline rendered posts"
+        }
+      ],
+      "boundary": [
+        {
+          "stage": "PageDagRuntime 执行配置节点",
+          "owner": "modules/webauto-v3/src/page-dag.mjs",
+          "line": 107,
+          "symbol": "async run(identity",
+          "reason": "Runtime execution, outside the static graph"
+        }
+      ]
+    },
+    "weibo-producer-consumer-chain": {
+      "file": "weibo-producer-consumer-chain.graph.json",
+      "nodes": [
+        {
+          "id": "producer",
+          "operator": "webauto.producer",
+          "operator_version": "1",
+          "owner": "apps/webauto/weibo-v3/workflows.mjs",
+          "line": 35,
+          "symbol": "export async function runProducer(",
+          "note": "Producer writes links.jsonl durable artifact; mergePosts dedup by url"
+        },
+        {
+          "id": "consumer",
+          "operator": "webauto.consumer",
+          "operator_version": "1",
+          "owner": "apps/webauto/weibo-v3/workflows.mjs",
+          "line": 104,
+          "symbol": "export async function runConsumer(",
+          "note": "Consumer filters pending via detailCompleted; failed links stay pending, no loss/dup"
+        }
+      ],
+      "boundary": [
+        {
+          "stage": "判定 producer 完成",
+          "owner": "apps/webauto/weibo-v3/workflows.mjs",
+          "line": 23,
+          "symbol": "function detailCompleted(",
+          "reason": "Durable completion predicate drives the chain, not a positional cursor"
+        }
+      ]
+    },
+    "computeruse-branch": {
+      "file": "computeruse-branch.graph.json",
+      "nodes": [
+        {
+          "id": "capture_screen",
+          "operator": "camo.snapshot",
+          "operator_version": "1",
+          "owner": "modules/webauto-v3/src/container.mjs",
+          "line": 10,
+          "symbol": "export function buildObservation(",
+          "note": "Screen observation projection; anchors owned by browser adapter"
+        },
+        {
+          "id": "resolve_target_region",
+          "operator": "computeruse.resolve_region",
+          "operator_version": "1",
+          "owner": "modules/camo-backend/src/internal/container-matcher.ts",
+          "line": 229,
+          "symbol": "private async matchContainer(",
+          "note": "Resolve a container/region from observation; computer-use uses screen regions not css selectors"
+        },
+        {
+          "id": "execute_system_action",
+          "operator": "computeruse.system_action",
+          "operator_version": "1",
+          "owner": "modules/operations/src/executor.ts",
+          "line": 16,
+          "symbol": "systemInput?:",
+          "note": "System-level mouse (move/click) via OperationContext.systemInput; computer-use branch uses coordinates, not DOM"
+        }
+      ],
+      "boundary": [
+        {
+          "stage": "CamoAdapter 唯一浏览器边界",
+          "owner": "modules/webauto-v3/src/camo-adapter.mjs",
+          "line": 33,
+          "symbol": "execCamo",
+          "reason": "All browser interaction goes through camo CLI spawn; no bypass"
+        }
+      ]
+    }
+  }
+}
