@@ -96,6 +96,7 @@ export async function extractDetail({
     mid,
     post: extracted.status,
     comments: extracted.comments || [],
+    commentTailReason: extracted.commentTailReason || null,
     pageResult,
   };
 }
@@ -113,6 +114,7 @@ export async function persistDetail({
   videosEnabled = false,
   linksEnabled = true,
   commentsEnabled = true,
+  commentTailReason = null,
   onLog = null,
 } = {}) {
   const ctx = resolveDetailContext({ keyword, env, outputRoot, postId: mid });
@@ -144,9 +146,16 @@ export async function persistDetail({
     counts: post.counts,
     region: post.region,
     source: post.source,
+    // The comment walk is bounded by the mobile endpoint's cursor. A truncated
+    // collection is reported here instead of looking like a complete page set.
+    commentTailReason: commentsEnabled ? commentTailReason : null,
   };
   await writeJson(ctx.metaPath, meta);
-  await appendLog(ctx.logPath, `post_done postId=${mid} comments=${comments.length} images=${images.length}`);
+  await appendLog(
+    ctx.logPath,
+    `post_done postId=${mid} comments=${comments.length} images=${images.length}`
+      + (commentsEnabled && commentTailReason ? ` commentTailReason=${commentTailReason}` : ''),
+  );
 
   const artifact = runtime?.recordArtifact({
     artifactType: 'weibo-detail',
@@ -211,6 +220,7 @@ export async function collectDetail({
     mid,
     post: extracted.post,
     comments: extracted.comments,
+    commentTailReason: extracted.commentTailReason || null,
     keyword,
     env,
     outputRoot,

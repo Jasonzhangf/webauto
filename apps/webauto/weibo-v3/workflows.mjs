@@ -250,6 +250,7 @@ export async function runDetailBatch({
         ok: true,
         skipped: result.skipped || false,
         mid: result.mid,
+        commentTailReason: result.meta?.commentTailReason || null,
       });
     } catch (error) {
       results.push({

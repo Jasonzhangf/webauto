@@ -8,8 +8,19 @@ import {
   normalizeStatus,
 } from './extract.mjs';
 
+// A fetch the host rejects (rate limit, blocked cursor parameter, or a
+// cross-compartment error) is serialized here so it reaches the caller as
+// data. Without this, the rejection escapes browser.evaluate's catch as an
+// un-deserializable value and fails the whole detail flow, including the
+// status payload that was already collected.
+function guardPageScript(script) {
+  return `Promise.resolve(${script})
+    .then((value) => ({ __error: null, value }))
+    .catch((error) => ({ __error: String(error?.message || error), value: null }))`;
+}
+
 function commentPageScript(url) {
-  return `fetch(${JSON.stringify(url)}, { credentials: 'include' })
+  return guardPageScript(`fetch(${JSON.stringify(url)}, { credentials: 'include' })
     .then((response) => response.json())
     .then((payload) => {
       const data = payload.data || {};
@@ -29,11 +40,11 @@ function commentPageScript(url) {
           user_name: row.user?.screen_name || null,
         })),
       };
-    })`;
+    })`);
 }
 
 function replyPageScript(url, referer) {
-  return `fetch(${JSON.stringify(url)}, {
+  return guardPageScript(`fetch(${JSON.stringify(url)}, {
     credentials: 'include',
     headers: { Referer: ${JSON.stringify(referer)} },
   })
@@ -54,7 +65,40 @@ function replyPageScript(url, referer) {
           user_name: row.user?.screen_name || null,
         })),
       };
-    })`;
+    })`);
+}
+
+// Bounded retry for a rejected comment/reply page. A cursor request can be
+// rejected after a short burst and served again once that state clears, so one
+// bounded retry pass is worth taking before stopping the walk.
+//
+// Two different failures are kept apart:
+//   * browser.evaluate REJECTING (transport threw) propagates unchanged, so a
+//     reply failure still fails the flow instead of becoming a partial result;
+//   * a page the host refused inside the page context comes back as an
+//     __error-bearing object and is treated as a rejected attempt.
+async function fetchPage(browser, script, attempts, retryDelayMs) {
+  const tries = Math.max(1, attempts);
+  let lastError = null;
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    const result = await browser.evaluate(script);
+    if (!isGuardedResult(result)) return { payload: result, reason: null };
+    if (result.__error === null) return { payload: result.value, reason: null };
+    lastError = result.__error;
+    if (attempt < tries) await sleep(Math.max(0, Number(retryDelayMs)) * attempt);
+  }
+  return { payload: null, reason: lastError || 'request_rejected' };
+}
+
+// Only an object that came through guardPageScript carries __error. A plain
+// page result (ok/maxId/rows) never does, so injecting a mock evaluate that
+// returns the bare shape keeps working.
+function isGuardedResult(result) {
+  return result !== null && typeof result === 'object' && !Array.isArray(result) && '__error' in result;
+}
+
+function sleep(durationMs) {
+  return new Promise((resolve) => setTimeout(resolve, durationMs));
 }
 
 export async function readStatus(browser, mid) {
@@ -70,11 +114,14 @@ export async function readComments(browser, mid, {
   limit = 0,
   maxPages = 200,
   minPageIntervalMs = 250,
+  attempts = 2,
+  retryDelayMs = 3000,
 } = {}) {
   const out = [];
   const seen = new Set();
   let maxId = null;
   let maxIdType = 0;
+  let tailReason = 'limit_reached';
 
   for (let page = 0; page < maxPages; page++) {
     const pageStartedAt = Date.now();
@@ -82,19 +129,46 @@ export async function readComments(browser, mid, {
     const url = maxId
       ? `${base}&max_id=${encodeURIComponent(maxId)}&max_id_type=${encodeURIComponent(maxIdType)}`
       : `${base}&max_id_type=0`;
-    const payload = await browser.evaluate(commentPageScript(url));
-    if (!payload?.ok) {
-      throw new Error(`comment API failed for ${mid} at page ${page + 1}`);
+    const { payload, reason } = await fetchPage(browser, commentPageScript(url), attempts, retryDelayMs);
+
+    if (!payload) {
+      // Rejected after the bounded retry. Pages already collected stay usable;
+      // the walk stops and reports why instead of failing the reader.
+      tailReason = page === 0 ? 'api_unavailable' : `page_blocked:${reason || 'request_rejected'}`;
+      break;
     }
+    if (!payload.ok) {
+      if (page === 0) {
+        throw new Error(`comment API failed for ${mid} at page 1`);
+      }
+      tailReason = 'api_not_ok';
+      break;
+    }
+
+    // Whether this iteration added anything the reader did not already have.
+    let progress = false;
     for (const row of payload.rows || []) {
       const comment = normalizeCommentRow(row);
       if (!comment.id || seen.has(comment.id)) continue;
       seen.add(comment.id);
       out.push(comment);
-      if (limit > 0 && out.length >= limit) return out;
+      progress = true;
+      if (limit > 0 && out.length >= limit) return setTailReason(out, 'limit_reached');
     }
+
+    if (!progress && out.length > 0) {
+      // The cursor moved but the page held no new comments. This is a stall
+      // rather than a refusal: the walk would otherwise repeat the same
+      // contents until maxPages. Stop while keeping what was collected.
+      tailReason = 'no_progress';
+      break;
+    }
+
     const nextId = payload.maxId ? String(payload.maxId) : null;
-    if (!nextId || nextId === String(maxId)) break;
+    if (!nextId || nextId === String(maxId)) {
+      tailReason = out.length > 0 ? 'no_more_pages' : 'api_unavailable';
+      break;
+    }
     maxId = nextId;
     maxIdType = payload.maxIdType || 0;
     // Readiness for the next page is the resolved response itself: the loop
@@ -104,7 +178,12 @@ export async function readComments(browser, mid, {
     // a ready next page is requested immediately.
     await paceBeforeNextPage(pageStartedAt, minPageIntervalMs);
   }
-  return out;
+  return setTailReason(out, tailReason);
+}
+
+function setTailReason(list, reason) {
+  list.tailReason = reason;
+  return list;
 }
 
 // Minimum interval between comments API pages. This is not a readiness wait:
@@ -120,6 +199,8 @@ async function paceBeforeNextPage(startedAt, minIntervalMs) {
 export async function readReplies(browser, mid, comment, {
   limit = 0,
   maxPages = 200,
+  attempts = 2,
+  retryDelayMs = 3000,
 } = {}) {
   if (!comment?.replyCount) return [];
   const out = [];
@@ -132,8 +213,10 @@ export async function readReplies(browser, mid, comment, {
     const url = maxId
       ? `${base}&max_id=${encodeURIComponent(maxId)}&max_id_type=0`
       : `${base}&max_id=0&max_id_type=0`;
-    const payload = await browser.evaluate(replyPageScript(url, referer));
-    if (!payload?.ok) {
+    const { payload } = await fetchPage(browser, replyPageScript(url, referer), attempts, retryDelayMs);
+    if (!payload || !payload.ok) {
+      // Replies are optional enrichment, but a rejected reply API must not be
+      // reported as an empty-but-complete reply set.
       throw new Error(`reply API failed for ${comment.id}`);
     }
     for (const row of payload.rows || []) {
@@ -156,14 +239,24 @@ export async function readPostWithComments(browser, mid, options = {}) {
     limit: options.commentLimit || 0,
     maxPages: options.commentPages || 200,
     minPageIntervalMs: options.minPageIntervalMs ?? 250,
+    attempts: options.commentAttempts ?? 2,
+    retryDelayMs: options.commentRetryDelayMs ?? 3000,
   });
+  // readComments attaches its stop reason on the list. Carry it out on the
+  // object instead of as an array property so callers can report the
+  // truncation without reading a magic field.
+  const tailReason = comments.tailReason || 'limit_reached';
+  const commentList = Array.from(comments);
+  delete commentList.tailReason;
   if (options.expandAllReplies !== false) {
-    for (const comment of comments) {
+    for (const comment of commentList) {
       comment.replies = await readReplies(browser, mid, comment, {
         limit: options.repliesPerComment ?? 0,
         maxPages: options.replyPages || 200,
+        attempts: options.replyAttempts ?? 2,
+        retryDelayMs: options.replyRetryDelayMs ?? 3000,
       });
     }
   }
-  return { status, comments };
+  return { status, comments: commentList, commentTailReason: tailReason };
 }
