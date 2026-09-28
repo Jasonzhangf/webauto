@@ -245,3 +245,34 @@ test('a refused reply endpoint is reported per comment instead of failing the po
   assert.equal(replyTries, 2, 'the refused reply page must be retried once');
   assert.equal('replyTailReason' in result.comments[0].replies, false);
 });
+
+test('a reply walk that repeats the same rows ends instead of looping', async () => {
+  // hotFlowChild can honour a cursor move and still hand back the same reply
+  // twice, which would otherwise repeat until maxPages. The walk must stop.
+  let replyPages = 0;
+  const browser = {
+    async fetchJson() {
+      return STATUS;
+    },
+    async evaluate(script) {
+      if (!String(script).includes('hotFlowChild')) {
+        return pagePayload([{ id: 'c1', text: 'first', total_number: 2 }], { maxId: null });
+      }
+      replyPages += 1;
+      return pagePayload(
+        [{ id: 'r1', text: 'reply', user: { screen_name: 'replier' } }],
+        { maxId: replyPages === 1 ? 'cursor-1' : 'cursor-2' },
+      );
+    },
+  };
+
+  const result = await readPostWithComments(browser, MID, {
+    minPageIntervalMs: 0,
+    commentRetryDelayMs: 0,
+    replyRetryDelayMs: 0,
+  });
+
+  assert.equal(replyPages, 2, 'must stop on a stalled reply cursor, not walk maxPages');
+  assert.equal(result.comments[0].replies.length, 1);
+  assert.equal(result.comments[0].replyTailReason, undefined, 'a stalled walk is not a refusal');
+});

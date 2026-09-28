@@ -151,10 +151,17 @@ export async function persistDetail({
     commentTailReason: commentsEnabled ? commentTailReason : null,
   };
   await writeJson(ctx.metaPath, meta);
+  // Operator-facing only: the artifact schema above is unchanged, but the log
+  // names how many reply-bearing comments the endpoint refused so a truncated
+  // reply set is not mistaken for "no replies". Per-cid reasons are in
+  // comments.jsonl.
+  const replyBlocked = comments.filter((comment) => comment.replyTailReason).length;
+  const replyRequested = comments.filter((comment) => (comment.replyCount || 0) > 0).length;
   await appendLog(
     ctx.logPath,
     `post_done postId=${mid} comments=${comments.length} images=${images.length}`
-      + (commentsEnabled && commentTailReason ? ` commentTailReason=${commentTailReason}` : ''),
+      + (commentsEnabled && commentTailReason ? ` commentTailReason=${commentTailReason}` : '')
+      + (commentsEnabled && replyBlocked ? ` replyBlocked=${replyBlocked}/${replyRequested}` : ''),
   );
 
   const artifact = runtime?.recordArtifact({

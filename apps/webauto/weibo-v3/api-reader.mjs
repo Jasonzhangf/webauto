@@ -213,6 +213,9 @@ export async function readReplies(browser, mid, comment, {
   const referer = `https://m.weibo.cn/detail/${mid}`;
 
   for (let page = 0; page < maxPages; page++) {
+    // Reset per page: the stall check only means anything when it tracks the
+    // rows this specific page added.
+    let progress = false;
     const base = `https://m.weibo.cn/comments/hotFlowChild?cid=${encodeURIComponent(comment.id)}`;
     const url = maxId
       ? `${base}&max_id=${encodeURIComponent(maxId)}&max_id_type=0`
@@ -230,7 +233,13 @@ export async function readReplies(browser, mid, comment, {
       if (!reply.id || seen.has(reply.id)) continue;
       seen.add(reply.id);
       out.push(reply);
+      progress = true;
       if (limit > 0 && out.length >= limit) return out;
+    }
+    if (!progress && out.length > 0) {
+      // Same stall as the comment walk: the cursor advanced but the page held
+      // no new replies, so the loop would otherwise repeat until maxPages.
+      break;
     }
     const nextId = payload.maxId ? String(payload.maxId) : null;
     if (!nextId || nextId === String(maxId)) break;
@@ -264,6 +273,11 @@ export async function readPostWithComments(browser, mid, options = {}) {
       });
       // A refused reply API leaves the reason on the reply list; move it onto
       // the comment so a caller can report it without reading an array field.
+      // A refused reply walk leaves its reason on the reply list; move it onto
+      // the comment so a caller can report it without reading an array field.
+      // Only refusals are marked: the endpoint neither reports its total nor
+      // returns every declared reply, so any label for a partially returned set
+      // would be a guess rather than a fact.
       if (comment.replies.replyTailReason) {
         comment.replyTailReason = comment.replies.replyTailReason;
         delete comment.replies.replyTailReason;
